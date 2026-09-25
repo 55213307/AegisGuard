@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AegisGuard | Customer Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Jersey+10&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/dashboard.css" />
+<link rel="stylesheet" href="css/customer-management.css" />
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <img class="sidebar-logo" src="../resources/logoNonBackground.png" alt="AegisGuard" />
+
+      <nav class="nav-list">
+        <a class="nav-item" href="dashboard.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item active" href="customer-management.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3 2.5-5.2 5.5-5.2s5.5 2.2 5.5 5.2"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.2 4.2 2.1 4.2 4.9"/></svg>
+          <span>Customer Management</span>
+        </a>
+        <a class="nav-item" href="account-management.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 15.5c0-1.6 1.4-2.5 3-2.5s3 .9 3 2.5"/><path d="M14 10h5M14 14h3.5"/></svg>
+          <span>Account Management</span>
+        </a>
+        <a class="nav-item" href="role-permissions.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="15" r="3.5"/><path d="M10.8 12.3 18 5.1M18 5.1l2 2M15.6 7.5l1.7 1.7"/></svg>
+          <span>Role &amp; Permissions</span>
+        </a>
+        <a class="nav-item" href="audit-logs.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3.5h9l3 3V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/><path d="M9 11h6M9 14.5h6M9 7.5h3"/></svg>
+          <span>Audit Logs</span>
+        </a>
+        <a class="nav-item" href="platform-setting.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="2.8"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3"/></svg>
+          <span>Platform Setting</span>
+        </a>
+      </nav>
+
+      <button class="nav-item nav-logout" type="button" id="logoutBtn">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H9"/><path d="M14 16.5 19 12l-5-4.5M19 12H9"/></svg>
+        <span>Log Out</span>
+      </button>
+    </aside>
+
+    <main class="cm-main">
+      <section class="cm-header">
+        <h1 class="cm-title">Customer Management</h1>
+        <p class="cm-subtitle">Create and manage customer companies on the AegisGuard platform.</p>
+      </section>
+
+      <section class="cm-grid">
+        <div class="cm-panel cm-form-panel">
+          <h2 class="cm-panel-title">Add New Customer</h2>
+          <p class="cm-panel-helper">Register a customer company and assign its first administrator.</p>
+
+          <form id="addCustomerForm" class="cm-form">
+            <div class="cm-field">
+              <label class="cm-label" for="companyName">Company Name *</label>
+              <input class="cm-input" type="text" id="companyName" name="companyName" placeholder="Enter registered company name" required />
+            </div>
+
+            <div class="cm-field">
+              <label class="cm-label" for="contactPerson">Contact Person</label>
+              <input class="cm-input" type="text" id="contactPerson" name="contactPerson" placeholder="Enter contact name (optional)" />
+            </div>
+
+            <div class="cm-field">
+              <label class="cm-label" for="contactEmail">Company Contact Email *</label>
+              <input class="cm-input" type="email" id="contactEmail" name="contactEmail" placeholder="admin@company.com" required />
+            </div>
+
+            <div class="cm-field">
+              <label class="cm-label" for="remark">Remark</label>
+              <textarea class="cm-input cm-textarea" id="remark" name="remark" placeholder="Enter Remark (optional)" rows="4"></textarea>
+            </div>
+
+            <div class="cm-field">
+              <label class="cm-label" for="contactNumber">Contact Number</label>
+              <div class="cm-phone-group">
+                <select class="cm-input cm-area-code" id="areaCode" name="areaCode" aria-label="Area code">
+                  <option value="+60">MY +60</option>
+                  <option value="+65">SG +65</option>
+                  <option value="+86">CN +86</option>
+                  <option value="+852">HK +852</option>
+                  <option value="+853">MO +853</option>
+                  <option value="+886">TW +886</option>
+                  <option value="+1">US +1</option>
+                  <option value="+44">UK +44</option>
+                  <option value="+61">AU +61</option>
+                  <option value="+81">JP +81</option>
+                </select>
+                <input class="cm-input cm-phone-input" type="tel" id="contactNumber" name="contactNumber" placeholder="Enter contact number (optional)" />
+              </div>
+            </div>
+
+            <button class="cm-submit-btn" type="submit">
+              <span aria-hidden="true">&#65291;</span> Create Customer
+            </button>
+          </form>
+        </div>
+
+        <div class="cm-panel cm-directory-panel">
+          <h2 class="cm-panel-title">Customer Activation Queue</h2>
+          <p class="cm-panel-helper">Customers awaiting account activation</p>
+
+          <div class="cm-table-header">
+            <span>Company</span>
+            <span>Queue</span>
+          </div>
+
+          <ul class="cm-row-list" id="directoryRowList"></ul>
+
+          <p class="cm-queue-overflow" id="queueOverflowNote"></p>
+
+          <div class="placeholder-body cm-empty-state" id="directoryEmptyState">
+            <p>No customers in the activation queue yet &mdash; this list will populate once the backend API is connected. Use the form to add a customer and preview the flow.</p>
+          </div>
+
+          <div class="cm-search">
+            <span class="cm-search-icon" aria-hidden="true">&#9906;</span>
+            <input class="cm-search-input" type="search" placeholder="Search customer companies..." id="directorySearch" />
+          </div>
+
+          <div class="cm-info-callout">
+            <p class="cm-info-heading">Customer onboarding</p>
+            <p class="cm-info-body">Create a company, then invite its administrator to access the customer portal.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/dashboard.js"></script>
+  <script src="js/customer-management.js"></script>
+</body>
+</html>

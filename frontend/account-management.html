@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AegisGuard | Account Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Jersey+10&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/dashboard.css" />
+<link rel="stylesheet" href="css/customer-management.css" />
+<link rel="stylesheet" href="css/account-management.css" />
+</head>
+<body>
+  <div class="dashboard">
+    <aside class="sidebar">
+      <img class="sidebar-logo" src="../resources/logoNonBackground.png" alt="AegisGuard" />
+
+      <nav class="nav-list">
+        <a class="nav-item" href="dashboard.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item" href="customer-management.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3 2.5-5.2 5.5-5.2s5.5 2.2 5.5 5.2"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.2 4.2 2.1 4.2 4.9"/></svg>
+          <span>Customer Management</span>
+        </a>
+        <a class="nav-item active" href="account-management.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 15.5c0-1.6 1.4-2.5 3-2.5s3 .9 3 2.5"/><path d="M14 10h5M14 14h3.5"/></svg>
+          <span>Account Management</span>
+        </a>
+        <a class="nav-item" href="role-permissions.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="15" r="3.5"/><path d="M10.8 12.3 18 5.1M18 5.1l2 2M15.6 7.5l1.7 1.7"/></svg>
+          <span>Role &amp; Permissions</span>
+        </a>
+        <a class="nav-item" href="audit-logs.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3.5h9l3 3V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/><path d="M9 11h6M9 14.5h6M9 7.5h3"/></svg>
+          <span>Audit Logs</span>
+        </a>
+        <a class="nav-item" href="platform-setting.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="2.8"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3"/></svg>
+          <span>Platform Setting</span>
+        </a>
+      </nav>
+
+      <button class="nav-item nav-logout" type="button" id="logoutBtn">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H9"/><path d="M14 16.5 19 12l-5-4.5M19 12H9"/></svg>
+        <span>Log Out</span>
+      </button>
+    </aside>
+
+    <main class="am-main">
+      <section class="am-header">
+        <h1 class="am-title">Account Management</h1>
+        <p class="am-subtitle">Review and manage customer accounts. Handle activation requests, monitor account status, and take necessary actions.</p>
+      </section>
+
+      <section class="am-stats-grid">
+        <article class="am-stat-card">
+          <span class="am-stat-dot" style="--dot-color:#2996FF"></span>
+          <p class="am-stat-label">Total Accounts</p>
+          <p class="am-stat-value" data-stat="total">--</p>
+        </article>
+        <article class="am-stat-card">
+          <span class="am-stat-dot" style="--dot-color:#59D69C"></span>
+          <p class="am-stat-label">Active Accounts</p>
+          <p class="am-stat-value" data-stat="active">--</p>
+        </article>
+        <article class="am-stat-card">
+          <span class="am-stat-dot" style="--dot-color:#F2B240"></span>
+          <p class="am-stat-label">Pending Activation</p>
+          <p class="am-stat-value" data-stat="pending">--</p>
+        </article>
+        <article class="am-stat-card">
+          <span class="am-stat-dot" style="--dot-color:#ED5966"></span>
+          <p class="am-stat-label">Locked Accounts</p>
+          <p class="am-stat-value" data-stat="locked">--</p>
+        </article>
+      </section>
+
+      <section class="am-tabs-bar" id="amTabsBar">
+        <button class="am-tab active" type="button" data-filter="all">All Accounts <span data-count="all">(0)</span></button>
+        <button class="am-tab" type="button" data-filter="active">Active Accounts <span data-count="active">(0)</span></button>
+        <button class="am-tab" type="button" data-filter="pending">Pending Activation <span data-count="pending">(0)</span></button>
+        <button class="am-tab" type="button" data-filter="locked">Locked Accounts <span data-count="locked">(0)</span></button>
+      </section>
+
+      <section class="am-toolbar">
+        <div class="am-search">
+          <span class="am-search-icon" aria-hidden="true">&#9906;</span>
+          <input class="am-search-input" type="search" placeholder="Search by name, email, or company..." id="accountSearch" />
+        </div>
+        <select class="am-filter" id="companyFilter">
+          <option value="">All Companies</option>
+        </select>
+        <select class="am-filter" id="roleFilter">
+          <option value="">All Roles</option>
+          <option value="Company Administrator">Company Admin</option>
+          <option value="Security Analyst">Security Analyst</option>
+          <option value="Viewer">Viewer</option>
+        </select>
+        <select class="am-filter" id="sortFilter">
+          <option value="newest">Sort: Date (Newest)</option>
+          <option value="oldest">Sort: Date (Oldest)</option>
+          <option value="name">Sort: Name (A-Z)</option>
+        </select>
+      </section>
+
+      <section class="am-panel am-table-panel">
+        <div class="am-table-header">
+          <span class="am-col-name">Name</span>
+          <span class="am-col-company">Company</span>
+          <span class="am-col-role">Role</span>
+          <span class="am-col-status">Status</span>
+          <span class="am-col-actions">Actions</span>
+        </div>
+
+        <div class="am-table-body" id="accountTableBody"></div>
+
+        <div class="am-pagination" id="pagination">
+          <p class="am-pagination-summary" id="paginationSummary"></p>
+          <div class="am-pagination-pages">
+            <button class="am-page-btn active" type="button">1</button>
+            <button class="am-page-btn" type="button">2</button>
+            <button class="am-page-btn" type="button">3</button>
+            <button class="am-page-btn" type="button">4</button>
+            <button class="am-page-btn" type="button">5</button>
+            <button class="am-page-btn am-page-next" type="button" aria-label="Next page">&rsaquo;</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="am-drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="am-drawer" id="accountDrawer">
+      <div class="am-drawer-header">
+        <h2>Account Details</h2>
+        <button class="am-drawer-close" type="button" id="drawerCloseBtn" aria-label="Close">&#10005;</button>
+      </div>
+
+      <div class="am-drawer-identity">
+        <span class="am-drawer-avatar" id="drawerAvatar"></span>
+        <div>
+          <p class="am-drawer-name" id="drawerName"></p>
+          <p class="am-drawer-company" id="drawerCompanySub"></p>
+        </div>
+      </div>
+
+      <dl class="am-drawer-fields">
+        <div class="am-drawer-field"><dt>Full Name</dt><dd id="drawerFullName"></dd></div>
+        <div class="am-drawer-field"><dt>Email</dt><dd id="drawerEmail"></dd></div>
+        <div class="am-drawer-field"><dt>Company</dt><dd id="drawerCompany"></dd></div>
+        <div class="am-drawer-field"><dt>Role</dt><dd id="drawerRole"></dd></div>
+        <div class="am-drawer-field"><dt>Submitted Date</dt><dd id="drawerDate"></dd></div>
+        <div class="am-drawer-field"><dt>Status</dt><dd><span class="am-status-pill" id="drawerStatusPill"></span></dd></div>
+        <div class="am-drawer-field"><dt>Operator</dt><dd id="drawerOperator"></dd></div>
+      </dl>
+
+      <div class="am-drawer-remarks">
+        <p class="am-drawer-remarks-title">Additional Information</p>
+        <p class="am-drawer-remarks-body" id="drawerRemarks"></p>
+      </div>
+
+      <div class="am-drawer-actions" id="drawerActions"></div>
+    </aside>
+  </div>
+
+  <script src="js/dashboard.js"></script>
+  <script src="js/account-management.js"></script>
+</body>
+</html>

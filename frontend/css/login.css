@@ -1,0 +1,326 @@
+:root {
+  --bg-dark: #0b0d14;
+  --card-bg: rgba(31, 36, 48, 0.72);
+  --card-border: rgba(102, 115, 138, 0.55);
+  --input-bg: rgba(38, 43, 56, 0.85);
+  --input-border: rgba(102, 115, 138, 0.55);
+  --text-primary: #f5f7fc;
+  --text-secondary: #a1adc2;
+  --text-muted: #8f99ad;
+  --text-label: #c7cfde;
+  --accent-blue: #056efa;
+  --link-blue: #2996ff;
+  --divider-color: rgba(97, 107, 125, 0.8);
+  --or-text: #a8b2c4;
+  --other-btn-bg: rgba(38, 43, 56, 0.7);
+  --other-btn-border: rgba(102, 115, 138, 0.55);
+  --other-btn-text: #e0e5f0;
+  --error-red: #ff5c5c;
+  --success-green: #2ecc71;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background-color: var(--bg-dark);
+  font-family: "Inter", sans-serif;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 48px 8vw;
+  background-color: var(--bg-dark);
+  background-image: radial-gradient(
+      circle at 12% 85%,
+      rgba(5, 110, 250, 0.08),
+      transparent 40%
+    ),
+    radial-gradient(circle at 92% 8%, rgba(5, 110, 250, 0.1), transparent 35%);
+}
+
+.brand {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 480px;
+}
+
+.brand-logo {
+  width: min(420px, 100%);
+  height: auto;
+}
+
+.card {
+  flex: 0 1 756px;
+  width: 100%;
+  max-width: 756px;
+  padding: 56px 50px;
+  border-radius: 28px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+}
+
+.welcome-heading {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: "Azeret Mono", monospace;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.signin-subtitle {
+  margin: 8px 0 32px;
+  color: var(--text-secondary);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.field {
+  margin-bottom: 20px;
+}
+
+.field-label {
+  display: none;
+}
+
+.field-input {
+  width: 100%;
+  height: 53px;
+  padding: 0 20px;
+  border-radius: 12px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: "Inter", sans-serif;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.field-input::placeholder {
+  color: var(--text-muted);
+}
+
+.field-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.field-input.error {
+  border-color: var(--error-red);
+  background: rgba(255, 92, 92, 0.08);
+}
+
+.field-input.error:focus {
+  border-color: var(--error-red);
+}
+
+.field-input.success {
+  border-color: var(--success-green);
+  background: rgba(46, 204, 113, 0.08);
+}
+
+.field-input.success:focus {
+  border-color: var(--success-green);
+}
+
+@keyframes shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-4px);
+  }
+  40%,
+  60% {
+    transform: translateX(4px);
+  }
+}
+
+.card.shake {
+  animation: shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 28px;
+}
+
+.remember-me {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.remember-me input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.checkbox-box {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--input-border);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.checkbox-tick {
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.remember-me input[type="checkbox"]:checked + .checkbox-box {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.remember-me input[type="checkbox"]:checked + .checkbox-box .checkbox-tick {
+  opacity: 1;
+}
+
+.remember-me input[type="checkbox"]:focus-visible + .checkbox-box {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.remember-label {
+  color: var(--text-label);
+  font-size: 14px;
+}
+
+.forgot-link,
+.forgot-link:visited {
+  color: var(--link-blue);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
+}
+
+.sign-in-btn {
+  width: 100%;
+  height: 56px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent-blue);
+  color: #ffffff;
+  font-family: "Inter", sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.sign-in-btn:hover {
+  filter: brightness(1.08);
+}
+
+.sign-in-btn:active {
+  filter: brightness(0.95);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 28px 0;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--divider-color);
+}
+
+.divider-label {
+  font-family: "Azeret Mono", monospace;
+  font-size: 13px;
+  color: var(--or-text);
+}
+
+.windows-btn {
+  width: 100%;
+  height: 56px;
+  border-radius: 12px;
+  border: 1px solid var(--other-btn-border);
+  background: var(--other-btn-bg);
+  color: var(--other-btn-text);
+  font-family: "Inter", sans-serif;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.windows-btn:hover {
+  background: rgba(38, 43, 56, 0.9);
+}
+
+.error-message {
+  margin: 16px 0 0;
+  min-height: 18px;
+  color: var(--error-red);
+  font-size: 14px;
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  .page {
+    flex-direction: column;
+    justify-content: center;
+    background-position: center top;
+    padding: 32px 6vw;
+  }
+
+  .brand {
+    align-items: center;
+    text-align: center;
+    max-width: 100%;
+  }
+
+  .card {
+    padding: 40px 28px;
+  }
+}

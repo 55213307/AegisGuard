@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AegisGuard | Sign In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/login.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="brand">
+      <img class="brand-logo" src="../resources/logoNonBackground.png" alt="AegisGuard - Secure today for a safer tomorrow" />
+    </div>
+
+    <form class="card" id="loginForm" novalidate>
+      <h1 class="welcome-heading">Welcome Back</h1>
+      <p class="signin-subtitle">Sign in to access AegisGuard</p>
+
+      <div class="field">
+        <label class="field-label" for="username">Username</label>
+        <input class="field-input" type="text" id="username" name="username" placeholder="Username" autocomplete="username" required />
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="password">Password</label>
+        <input class="field-input" type="password" id="password" name="password" placeholder="Password" autocomplete="current-password" required />
+      </div>
+
+      <div class="row-between">
+        <label class="remember-me">
+          <input type="checkbox" id="rememberMe" name="rememberMe" />
+          <span class="checkbox-box"><span class="checkbox-tick">&#10003;</span></span>
+          <span class="remember-label">Remember me</span>
+        </label>
+        <a class="forgot-link" href="#">Forgot password?</a>
+      </div>
+
+      <button class="sign-in-btn" type="submit">Sign In</button>
+
+      <div class="divider">
+        <span class="divider-line"></span>
+        <span class="divider-label">OR</span>
+        <span class="divider-line"></span>
+      </div>
+
+      <button class="windows-btn" type="button" id="windowsSignIn">
+        <svg class="windows-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1 2.6L7.4 1.7V8H1V2.6Z" fill="#E0E5F0"/>
+          <path d="M8.2 1.6L17 0.3V8H8.2V1.6Z" fill="#E0E5F0"/>
+          <path d="M1 8.8H7.4V15.3L1 14.4V8.8Z" fill="#E0E5F0"/>
+          <path d="M8.2 8.8H17V17.7L8.2 16.4V8.8Z" fill="#E0E5F0"/>
+        </svg>
+        <span>Sign in with Windows</span>
+      </button>
+
+      <p class="error-message" id="errorMessage" role="alert" aria-live="polite"></p>
+    </form>
+  </div>
+
+  <script src="js/login.js"></script>
+</body>
+</html>

@@ -253,28 +253,6 @@ select.cm-input {
   text-align: center;
 }
 
-.cm-activate-btn {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid var(--status-ok, #2ecc71);
-  background: rgba(46, 204, 113, 0.1);
-  color: #2ecc71;
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.1s ease;
-}
-
-.cm-activate-btn:hover {
-  background: rgba(46, 204, 113, 0.25);
-}
-
-.cm-activate-btn:active {
-  transform: scale(0.92);
-}
-
 @keyframes cmRowSlideIn {
   from {
     transform: translateX(-60px);
@@ -286,24 +264,8 @@ select.cm-input {
   }
 }
 
-@keyframes cmRowSlideOut {
-  from {
-    transform: translateX(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(80px);
-    opacity: 0;
-  }
-}
-
 .cm-row.cm-row-enter {
   animation: cmRowSlideIn 0.4s ease both;
-}
-
-.cm-row.cm-row-exit {
-  animation: cmRowSlideOut 0.35s ease forwards;
-  pointer-events: none;
 }
 
 .cm-search {

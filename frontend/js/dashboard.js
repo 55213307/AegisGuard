@@ -1,8 +1,10 @@
+requireAuth();
+
 const logoutBtn = document.getElementById("logoutBtn");
 const welcomeHeading = document.getElementById("welcomeHeading");
 
 logoutBtn.addEventListener("click", () => {
-  // TODO: call the C# backend to invalidate the session once auth exists.
+  clearSession();
   window.location.href = "login.html";
 });
 
@@ -14,21 +16,41 @@ function getTimeOfDayGreeting(hour = new Date().getHours()) {
 
 function renderWelcomeHeading() {
   if (!welcomeHeading) return;
-  // TODO: once the backend exists, use the authenticated user's real
-  // display name instead of what was typed into the login form.
   const username = sessionStorage.getItem("username") || "Admin";
   welcomeHeading.textContent = `Good ${getTimeOfDayGreeting()} ${username}`;
 }
 
 renderWelcomeHeading();
 
-// TODO: replace with real data from the C# backend, e.g.
-// fetch("/api/dashboard/summary").then(r => r.json()).then(renderStats);
 function renderStats(data) {
+  const map = {
+    totalCustomers: data.total_customers,
+    activeCustomers: data.active_customers,
+    monitoringAccounts: data.monitoring_accounts,
+    lockedAccounts: data.locked_accounts,
+    pendingAccounts: data.pending_accounts,
+    platformStatus: data.platform_status,
+  };
+
   document.querySelectorAll("[data-stat]").forEach((el) => {
-    const key = el.dataset.stat;
-    if (data[key] !== undefined) {
-      el.textContent = data[key];
+    const value = map[el.dataset.stat];
+    if (value !== undefined) {
+      el.textContent = value;
     }
   });
 }
+
+async function loadDashboardSummary() {
+  // Only dashboard.html has these stat cards; other pages that also load
+  // this script (for the shared sidebar/logout) can skip the fetch.
+  if (document.querySelectorAll("[data-stat]").length === 0) return;
+
+  try {
+    const summary = await apiFetch("/api/dashboard/summary");
+    renderStats(summary);
+  } catch (err) {
+    console.error("Failed to load dashboard summary", err);
+  }
+}
+
+loadDashboardSummary();

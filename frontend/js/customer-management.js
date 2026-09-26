@@ -1,3 +1,5 @@
+requireAuth();
+
 const addCustomerForm = document.getElementById("addCustomerForm");
 const directorySearch = document.getElementById("directorySearch");
 const rowList = document.getElementById("directoryRowList");
@@ -6,17 +8,11 @@ const overflowNote = document.getElementById("queueOverflowNote");
 
 const MAX_VISIBLE_QUEUE = 4;
 
-// TODO: once the backend exists, load the real queue here instead of
-// starting empty, e.g. fetch("/api/customers/queue").then(...).
-let nextCustomerNumber = 1;
-
 // Source of truth for the whole queue, visible rows AND the ones waiting
 // off-screen. DOM only ever renders the first MAX_VISIBLE_QUEUE entries.
-const queue = [];
-
-function formatCustomerNumber(n) {
-  return String(n).padStart(3, "0");
-}
+// Read-only: a customer leaves this list only once its admin account is
+// approved (Active) in Account Management, so there's nothing to click here.
+let queue = [];
 
 function updateEmptyState() {
   emptyState.style.display = queue.length === 0 ? "flex" : "none";
@@ -34,15 +30,15 @@ function updateOverflowNote() {
 }
 
 function renumberVisibleRows() {
-  const rows = Array.from(rowList.querySelectorAll(".cm-row:not(.cm-row-exit)"));
+  const rows = Array.from(rowList.querySelectorAll(".cm-row"));
   rows.forEach((row, index) => {
     row.querySelector(".cm-queue-badge").textContent = index + 1;
   });
 }
 
-function createRowElement(item) {
+function createRowElement(item, { animateIn = false } = {}) {
   const li = document.createElement("li");
-  li.className = "cm-row cm-row-enter";
+  li.className = animateIn ? "cm-row cm-row-enter" : "cm-row";
   li.dataset.id = item.id;
 
   li.innerHTML = `
@@ -51,105 +47,78 @@ function createRowElement(item) {
       <p class="cm-row-detail"></p>
     </div>
     <span class="cm-queue-badge"></span>
-    <button class="cm-activate-btn" type="button" title="Activate this customer">&#10003;</button>
   `;
 
-  li.querySelector(".cm-row-company").textContent = item.company;
-  li.querySelector(".cm-row-detail").textContent = `ID: ${item.id}`;
+  li.querySelector(".cm-row-company").textContent = item.company_name;
+  li.querySelector(".cm-row-detail").textContent = `ID: ${item.customer_code}`;
 
-  li.addEventListener(
-    "animationend",
-    () => li.classList.remove("cm-row-enter"),
-    { once: true }
-  );
+  if (animateIn) {
+    li.addEventListener("animationend", () => li.classList.remove("cm-row-enter"), { once: true });
+  }
 
   return li;
 }
 
-updateEmptyState();
-updateOverflowNote();
-
-function addCustomerToQueue(companyName) {
-  const item = { id: `AG-CUS-${formatCustomerNumber(nextCustomerNumber)}`, company: companyName };
-  nextCustomerNumber += 1;
-  // New customers join the back of the line.
-  queue.push(item);
-
-  const visibleRows = rowList.querySelectorAll(".cm-row:not(.cm-row-exit)");
-  if (visibleRows.length < MAX_VISIBLE_QUEUE) {
-    // There's still room on screen — show it sliding in at the bottom.
+function renderInitialQueue() {
+  rowList.innerHTML = "";
+  queue.slice(0, MAX_VISIBLE_QUEUE).forEach((item) => {
     rowList.appendChild(createRowElement(item));
-    renumberVisibleRows();
-  }
-  // Otherwise it just waits off-screen; the overflow note below picks it up.
-
+  });
+  renumberVisibleRows();
   updateEmptyState();
   updateOverflowNote();
 }
 
-function fadeOutRow(row) {
-  if (row.classList.contains("cm-row-exit")) return;
-
-  row.classList.add("cm-row-exit");
-  row.addEventListener(
-    "animationend",
-    () => {
-      row.remove();
-      renumberVisibleRows();
-      updateEmptyState();
-      updateOverflowNote();
-      revealNextQueuedRow();
-    },
-    { once: true }
-  );
+async function loadQueue() {
+  try {
+    const data = await apiFetch("/api/customers/queue");
+    queue = data.items;
+    renderInitialQueue();
+  } catch (err) {
+    console.error("Failed to load activation queue", err);
+    emptyState.querySelector("p").textContent =
+      "Could not load the activation queue. Please refresh the page.";
+    emptyState.style.display = "flex";
+  }
 }
 
-// After a visible row is removed for good (activated), pull the next
-// waiting customer (if any) into the now-empty 4th slot.
-function revealNextQueuedRow() {
-  const visibleCount = rowList.querySelectorAll(".cm-row:not(.cm-row-exit)").length;
-  if (visibleCount >= MAX_VISIBLE_QUEUE) return;
-
-  const nextItem = queue[visibleCount];
-  if (!nextItem) return;
-
-  rowList.appendChild(createRowElement(nextItem));
-  renumberVisibleRows();
-  updateOverflowNote();
-}
-
-function activateRow(row) {
-  if (row.classList.contains("cm-row-exit")) return;
-
-  const customerId = row.dataset.id;
-  const queueIndex = queue.findIndex((item) => item.id === customerId);
-  if (queueIndex !== -1) queue.splice(queueIndex, 1);
-
-  // TODO: call the C# backend to mark this customer as activated, e.g.
-  // fetch(`/api/customers/${customerId}/activate`, { method: "POST" })
-  fadeOutRow(row);
-}
-
-rowList.addEventListener("click", (event) => {
-  const btn = event.target.closest(".cm-activate-btn");
-  if (!btn) return;
-  const row = btn.closest(".cm-row");
-  if (row) activateRow(row);
-});
-
-addCustomerForm.addEventListener("submit", (event) => {
+addCustomerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const formData = new FormData(addCustomerForm);
-  const payload = Object.fromEntries(formData.entries());
+  const payload = {
+    company_name: formData.get("companyName")?.trim(),
+    contact_person: formData.get("contactPerson")?.trim() || null,
+    contact_email: formData.get("contactEmail")?.trim(),
+    area_code: formData.get("areaCode") || null,
+    contact_number: formData.get("contactNumber")?.trim() || null,
+    remark: formData.get("remark")?.trim() || null,
+  };
 
-  // TODO: replace with a real call to the C# backend, e.g.
-  // fetch("/api/customers", { method: "POST", body: JSON.stringify(payload) })
-  console.log("Create customer", payload);
+  const submitBtn = addCustomerForm.querySelector(".cm-submit-btn");
+  submitBtn.disabled = true;
 
-  addCustomerToQueue(payload.companyName);
+  try {
+    // Creating the customer also creates its Pending admin account, so it
+    // joins the back of this queue immediately.
+    const created = await apiFetch("/api/customers", { method: "POST", body: payload });
+    queue.push(created);
 
-  addCustomerForm.reset();
+    const visibleRows = rowList.querySelectorAll(".cm-row");
+    if (visibleRows.length < MAX_VISIBLE_QUEUE) {
+      rowList.appendChild(createRowElement(created, { animateIn: true }));
+      renumberVisibleRows();
+    }
+
+    updateEmptyState();
+    updateOverflowNote();
+    addCustomerForm.reset();
+  } catch (err) {
+    console.error("Failed to create customer", err);
+    alert(err.message || "Could not create this customer. Please try again.");
+  } finally {
+    submitBtn.disabled = false;
+  }
 });
 
 directorySearch.addEventListener("input", () => {
@@ -162,3 +131,5 @@ directorySearch.addEventListener("input", () => {
     row.style.display = matches ? "" : "none";
   });
 });
+
+loadQueue();

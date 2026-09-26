@@ -1,6 +1,4 @@
-// TODO: no backend yet — load the real list here once it exists, e.g.
-// fetch("/api/accounts").then(r => r.json()).then(renderAccounts);
-const accounts = [];
+requireAuth();
 
 const tableBody = document.getElementById("accountTableBody");
 const tabsBar = document.getElementById("amTabsBar");
@@ -17,59 +15,46 @@ const drawerCloseBtn = document.getElementById("drawerCloseBtn");
 const drawerActions = document.getElementById("drawerActions");
 
 let activeFilter = "all";
+let currentAccounts = [];
+let searchDebounceTimer = null;
 
-function populateCompanyFilter() {
-  const companies = [...new Set(accounts.map((a) => a.company))].sort();
-  companies.forEach((company) => {
-    const option = document.createElement("option");
-    option.value = company;
-    option.textContent = company;
-    companyFilter.appendChild(option);
-  });
-}
+// The API doesn't paginate yet — it returns every matching account in one
+// response — so the page-number buttons are hidden rather than faked.
+pagination.querySelector(".am-pagination-pages").style.display = "none";
 
-function updateTabCounts() {
-  const counts = { all: accounts.length, active: 0, pending: 0, locked: 0 };
-  accounts.forEach((a) => {
-    if (a.status === "Active") counts.active += 1;
-    if (a.status === "Pending") counts.pending += 1;
-    if (a.status === "Locked") counts.locked += 1;
-  });
-  Object.entries(counts).forEach(([key, value]) => {
-    const el = tabsBar.querySelector(`[data-count="${key}"]`);
-    if (el) el.textContent = `(${value})`;
-  });
-}
+const STATUS_MAP = { active: "Active", pending: "Pending", locked: "Locked" };
 
 function getInitials(name) {
   return name.trim().charAt(0).toUpperCase();
 }
 
-function getFilteredAccounts() {
-  const statusMap = { active: "Active", pending: "Pending", locked: "Locked" };
-  const query = searchInput.value.trim().toLowerCase();
-  const companyValue = companyFilter.value;
-  const roleValue = roleFilter.value;
+async function populateCompanyFilter() {
+  try {
+    const companies = await apiFetch("/api/customers");
+    companies
+      .map((c) => c.company_name)
+      .sort()
+      .forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        companyFilter.appendChild(option);
+      });
+  } catch (err) {
+    console.error("Failed to load companies for filter", err);
+  }
+}
 
-  let list = accounts.filter((a) => {
-    if (activeFilter !== "all" && a.status !== statusMap[activeFilter]) return false;
-    if (companyValue && a.company !== companyValue) return false;
-    if (roleValue && a.role !== roleValue) return false;
-    if (query) {
-      const haystack = `${a.name} ${a.email} ${a.company}`.toLowerCase();
-      if (!haystack.includes(query)) return false;
-    }
-    return true;
-  });
-
-  const sortValue = sortFilter.value;
-  list = [...list].sort((a, b) => {
-    if (sortValue === "name") return a.name.localeCompare(b.name);
-    if (sortValue === "oldest") return a.date.localeCompare(b.date);
-    return b.date.localeCompare(a.date); // newest
-  });
-
-  return list;
+async function loadSummary() {
+  try {
+    const summary = await apiFetch("/api/accounts/summary");
+    document.querySelectorAll("[data-stat]").forEach((el) => {
+      const key = el.dataset.stat;
+      if (summary[key] !== undefined) el.textContent = summary[key];
+    });
+  } catch (err) {
+    console.error("Failed to load account summary", err);
+  }
 }
 
 function createRowElement(account) {
@@ -82,7 +67,7 @@ function createRowElement(account) {
       <span class="am-avatar">${getInitials(account.name)}</span>
       <span class="am-row-name-text">${account.name}</span>
     </div>
-    <div class="am-row-company">${account.company}</div>
+    <div class="am-row-company">${account.company_name}</div>
     <div class="am-row-role">${account.role}</div>
     <div class="am-row-status"><span class="am-status-pill" data-status="${account.status}">${account.status}</span></div>
     <div class="am-row-actions">
@@ -94,34 +79,40 @@ function createRowElement(account) {
   return row;
 }
 
-function renderTable() {
-  const filtered = getFilteredAccounts();
+async function loadAccounts() {
+  const params = new URLSearchParams();
+  if (activeFilter !== "all") params.set("status", STATUS_MAP[activeFilter]);
+  if (companyFilter.value) params.set("company", companyFilter.value);
+  if (roleFilter.value) params.set("role", roleFilter.value);
+  if (searchInput.value.trim()) params.set("search", searchInput.value.trim());
+  params.set("sort", sortFilter.value);
+
+  tableBody.innerHTML = `<div class="am-empty-row">Loading accounts&hellip;</div>`;
+
+  try {
+    const data = await apiFetch(`/api/accounts?${params.toString()}`);
+    currentAccounts = data.items;
+    renderTable(data.items);
+  } catch (err) {
+    console.error("Failed to load accounts", err);
+    tableBody.innerHTML = `<div class="am-empty-row">Could not load accounts. Please try again.</div>`;
+  }
+}
+
+function renderTable(items) {
   tableBody.innerHTML = "";
 
-  if (accounts.length === 0) {
+  if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "placeholder-body am-empty-row";
-    empty.innerHTML =
-      "<p>No accounts to display yet &mdash; this list will populate once the backend API is connected.</p>";
+    empty.innerHTML = "<p>No accounts to display for this view.</p>";
     tableBody.appendChild(empty);
-    pagination.style.display = "none";
+    paginationSummary.textContent = "";
     return;
   }
 
-  if (filtered.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "am-empty-row";
-    empty.textContent = "No accounts match your filters.";
-    tableBody.appendChild(empty);
-  } else {
-    filtered.forEach((account) => tableBody.appendChild(createRowElement(account)));
-  }
-
-  pagination.style.display = "";
-  paginationSummary.textContent =
-    activeFilter === "all"
-      ? `Showing 1–${filtered.length} of ${accounts.length} accounts`
-      : `Showing ${filtered.length} of ${filtered.length} accounts`;
+  items.forEach((account) => tableBody.appendChild(createRowElement(account)));
+  paginationSummary.textContent = `Showing ${items.length} of ${items.length} accounts`;
 }
 
 tabsBar.addEventListener("click", (event) => {
@@ -130,12 +121,16 @@ tabsBar.addEventListener("click", (event) => {
   tabsBar.querySelectorAll(".am-tab").forEach((t) => t.classList.remove("active"));
   btn.classList.add("active");
   activeFilter = btn.dataset.filter;
-  renderTable();
+  loadAccounts();
 });
 
-[searchInput, companyFilter, roleFilter, sortFilter].forEach((el) => {
-  el.addEventListener("input", renderTable);
-  el.addEventListener("change", renderTable);
+searchInput.addEventListener("input", () => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(loadAccounts, 300);
+});
+
+[companyFilter, roleFilter, sortFilter].forEach((el) => {
+  el.addEventListener("change", loadAccounts);
 });
 
 function buildActionButtons(account) {
@@ -158,16 +153,20 @@ function buildActionButtons(account) {
 }
 
 function openDrawer(account) {
+  drawer.dataset.accountId = account.id;
+
   document.getElementById("drawerAvatar").textContent = getInitials(account.name);
   document.getElementById("drawerName").textContent = account.name;
-  document.getElementById("drawerCompanySub").textContent = account.company;
+  document.getElementById("drawerCompanySub").textContent = account.company_name;
   document.getElementById("drawerFullName").textContent = account.name;
   document.getElementById("drawerEmail").textContent = account.email;
-  document.getElementById("drawerCompany").textContent = account.company;
+  document.getElementById("drawerCompany").textContent = account.company_name;
   document.getElementById("drawerRole").textContent = account.role;
-  document.getElementById("drawerDate").textContent = account.date;
-  document.getElementById("drawerOperator").textContent = account.operator;
-  document.getElementById("drawerRemarks").textContent = `Remarks: ${account.remarks}`;
+  document.getElementById("drawerDate").textContent = new Date(account.submitted_at).toLocaleDateString();
+  document.getElementById("drawerOperator").textContent = account.operator_name || "—";
+  document.getElementById("drawerRemarks").textContent = account.remarks
+    ? `Remarks: ${account.remarks}`
+    : "No additional remarks.";
 
   const pill = document.getElementById("drawerStatusPill");
   pill.textContent = account.status;
@@ -182,35 +181,50 @@ function openDrawer(account) {
 function closeDrawer() {
   drawer.classList.remove("open");
   drawerBackdrop.classList.remove("open");
+  delete drawer.dataset.accountId;
 }
 
 tableBody.addEventListener("click", (event) => {
   const row = event.target.closest(".am-row");
   if (!row) return;
-  const account = accounts.find((a) => a.id === Number(row.dataset.id));
+  const account = currentAccounts.find((a) => a.id === Number(row.dataset.id));
   if (!account) return;
 
   if (event.target.closest(".am-action-view")) {
     openDrawer(account);
   } else if (event.target.closest(".am-action-delete")) {
-    // TODO: call the C# backend to delete this account, e.g.
-    // fetch(`/api/accounts/${account.id}`, { method: "DELETE" })
-    console.log("Delete account", account.id);
+    if (!confirm(`Delete ${account.name}'s account? This cannot be undone.`)) return;
+    apiFetch(`/api/accounts/${account.id}`, { method: "DELETE" })
+      .then(() => {
+        loadAccounts();
+        loadSummary();
+      })
+      .catch((err) => alert(err.message || "Could not delete this account."));
   }
 });
 
-drawerActions.addEventListener("click", (event) => {
+drawerActions.addEventListener("click", async (event) => {
   const btn = event.target.closest("[data-action]");
   if (!btn) return;
-  // TODO: call the C# backend to update account status, e.g.
-  // fetch(`/api/accounts/${id}/${action}`, { method: "POST" })
-  console.log("Account action:", btn.dataset.action);
-  closeDrawer();
+
+  const accountId = drawer.dataset.accountId;
+  const action = btn.dataset.action;
+  btn.disabled = true;
+
+  try {
+    await apiFetch(`/api/accounts/${accountId}/${action}`, { method: "POST" });
+    closeDrawer();
+    loadAccounts();
+    loadSummary();
+  } catch (err) {
+    alert(err.message || "Could not update this account. Please try again.");
+    btn.disabled = false;
+  }
 });
 
 drawerCloseBtn.addEventListener("click", closeDrawer);
 drawerBackdrop.addEventListener("click", closeDrawer);
 
 populateCompanyFilter();
-updateTabCounts();
-renderTable();
+loadSummary();
+loadAccounts();

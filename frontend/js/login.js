@@ -4,12 +4,6 @@ const usernameInput = document.getElementById("username");
 const passwordInput = document.getElementById("password");
 const windowsSignInBtn = document.getElementById("windowsSignIn");
 
-// TEMP: stand-in for the real C# auth endpoint until it exists.
-// Replace this whole function with a fetch("/api/auth/login", ...) call.
-function fakeAuthenticate(username, password) {
-  return username === "tester1" && password === "1234";
-}
-
 function clearFieldErrors() {
   usernameInput.classList.remove("error", "success");
   passwordInput.classList.remove("error", "success");
@@ -43,7 +37,7 @@ function clearError() {
   });
 });
 
-form.addEventListener("submit", (event) => {
+form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const username = usernameInput.value.trim();
@@ -58,29 +52,33 @@ form.addEventListener("submit", (event) => {
     return;
   }
 
-  // TODO: replace with a real call to the C# backend once the API is ready.
-  const success = fakeAuthenticate(username, password);
+  const submitBtn = form.querySelector(".sign-in-btn");
+  submitBtn.disabled = true;
 
-  if (!success) {
-    showError("Username or password wrong, please try again.", [usernameInput, passwordInput]);
-    return;
+  try {
+    const result = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: { username, password },
+      skipAuthRedirect: true,
+    });
+
+    clearError();
+    usernameInput.classList.add("success");
+    passwordInput.classList.add("success");
+
+    setSession(result.access_token, result.user.display_name || result.user.username);
+
+    setTimeout(() => {
+      window.location.href = "dashboard.html";
+    }, 500);
+  } catch (err) {
+    showError(err.message || "Username or password wrong, please try again.", [usernameInput, passwordInput]);
+  } finally {
+    submitBtn.disabled = false;
   }
-
-  clearError();
-  usernameInput.classList.add("success");
-  passwordInput.classList.add("success");
-  console.log("Sign in attempt", { username, rememberMe: form.rememberMe.checked });
-
-  // TODO: once the backend exists, store the real signed-in user info
-  // (e.g. from the auth response) instead of the raw form value.
-  sessionStorage.setItem("username", username);
-
-  setTimeout(() => {
-    window.location.href = "dashboard.html";
-  }, 500);
 });
 
 windowsSignInBtn.addEventListener("click", () => {
-  // TODO: wire up Windows/SSO sign-in once the backend auth flow is defined.
+  // TODO: wire up Windows/SSO sign-in once that backend auth flow is defined.
   console.log("Windows sign-in clicked");
 });

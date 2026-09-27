@@ -13,14 +13,16 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[De
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(db: Session = Depends(get_db)) -> DashboardSummary:
     total_customers = db.query(Customer).count()
-    active_customers = db.query(Customer).filter(Customer.is_activated.is_(True)).count()
+    active_customers = (
+        db.query(Customer).join(Account).filter(Account.customer_status == AccountStatus.ACTIVE).count()
+    )
 
     # The dashboard's stat cards ("Monitoring Accounts", "Pending Accounts",
     # "Locked Accounts") mirror the account statuses shown on the Account
     # Management page.
-    pending_accounts = db.query(Account).filter(Account.status == AccountStatus.PENDING).count()
-    locked_accounts = db.query(Account).filter(Account.status == AccountStatus.LOCKED).count()
-    monitoring_accounts = db.query(Account).filter(Account.status == AccountStatus.ACTIVE).count()
+    pending_accounts = db.query(Account).filter(Account.customer_status == AccountStatus.PENDING).count()
+    locked_accounts = db.query(Account).filter(Account.customer_status == AccountStatus.LOCKED).count()
+    monitoring_accounts = db.query(Account).filter(Account.customer_status == AccountStatus.ACTIVE).count()
 
     # TODO: wire this up to a real health check (Wazuh / worker liveness)
     # once that integration exists — for now it just reports the API is up.

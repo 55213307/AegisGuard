@@ -1,21 +1,21 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
-from app.models.account import AccountRole, AccountStatus
+from app.models.account import AccountStatus
 
 
 class AccountOut(BaseModel):
     id: int
-    name: str
-    email: str
-    role: AccountRole
-    status: AccountStatus
-    remarks: str | None
-    company_id: int
+    customer_name: str
+    customer_email: str
+    customer_status: AccountStatus
+    unique_id: int
     company_name: str
+    contact_number: str | None
+    remark: str | None
     operator_name: str | None
-    submitted_at: datetime
+    submitted_time: datetime
 
     model_config = {"from_attributes": True}
 
@@ -23,14 +23,6 @@ class AccountOut(BaseModel):
 class AccountListResponse(BaseModel):
     total: int
     items: list[AccountOut]
-
-
-class AccountCreate(BaseModel):
-    name: str
-    email: EmailStr
-    role: AccountRole
-    company_id: int
-    remarks: str | None = None
 
 
 class AccountSummary(BaseModel):

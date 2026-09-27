@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
-    admin = db.query(AdminUser).filter(AdminUser.username == payload.username).first()
+    admin = db.query(AdminUser).filter(AdminUser.login_username == payload.username).first()
 
     if admin is None or not verify_password(payload.password, admin.password_hash):
         raise HTTPException(
@@ -19,8 +19,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
             detail="Username or password wrong, please try again.",
         )
 
-    token = create_access_token(subject=admin.username)
+    token = create_access_token(subject=admin.login_username)
     return LoginResponse(
         access_token=token,
-        user=LoginUser(username=admin.username, display_name=admin.display_name),
+        user=LoginUser(username=admin.login_username, display_name=admin.display_name),
     )

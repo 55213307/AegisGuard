@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin
 from app.db.session import get_db
-from app.models.account import Account, AccountRole, AccountStatus
+from app.models.account import Account, AccountStatus
 from app.models.customer import Customer
 from app.schemas.customer import CustomerCreate, CustomerOut, QueueResponse
 
@@ -17,10 +17,10 @@ def list_customers(db: Session = Depends(get_db)) -> list[Customer]:
 
 @router.get("/queue", response_model=QueueResponse)
 def get_activation_queue(db: Session = Depends(get_db)) -> QueueResponse:
-    """Read-only FIFO view of customers whose admin account isn't Active yet.
+    """Read-only FIFO view of customers whose account isn't Active yet.
 
-    A customer enters this queue the moment it's created (its admin account
-    starts life as Pending) and only drops out once that account is approved
+    A customer enters this queue the moment it's created (its account starts
+    life as Pending) and only drops out once that account is approved
     (status Active) in Account Management — there's no action to take here.
 
     The frontend (customer-management.js) only ever renders the first 4 of
@@ -31,7 +31,7 @@ def get_activation_queue(db: Session = Depends(get_db)) -> QueueResponse:
         db.query(Customer)
         .outerjoin(
             Account,
-            (Account.company_id == Customer.id) & (Account.status == AccountStatus.ACTIVE),
+            (Account.unique_id == Customer.id) & (Account.customer_status == AccountStatus.ACTIVE),
         )
         .filter(Account.id.is_(None))
         .order_by(Customer.created_at.asc())
@@ -46,15 +46,14 @@ def create_customer(payload: CustomerCreate, db: Session = Depends(get_db)) -> C
     db.add(customer)
     db.flush()  # assigns customer.id for the account's FK below
 
-    # Registering a customer immediately registers its first administrator
-    # account too, Pending until approved in Account Management.
+    # Registering a customer immediately registers its one account, Pending
+    # until approved in Account Management.
     db.add(
         Account(
-            name=customer.contact_person or customer.company_name,
-            email=customer.contact_email,
-            role=AccountRole.COMPANY_ADMIN,
-            status=AccountStatus.PENDING,
-            company_id=customer.id,
+            customer_name=customer.contact_name or customer.company_name,
+            customer_email=customer.contact_email,
+            customer_status=AccountStatus.PENDING,
+            unique_id=customer.id,
         )
     )
 

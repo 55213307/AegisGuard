@@ -17,15 +17,15 @@ router = APIRouter(prefix="/api/accounts", tags=["accounts"], dependencies=[Depe
 def _to_out(account: Account) -> AccountOut:
     return AccountOut(
         id=account.id,
-        name=account.name,
-        email=account.email,
-        role=account.role,
-        status=account.status,
-        remarks=account.remarks,
-        company_id=account.company_id,
+        customer_name=account.customer_name,
+        customer_email=account.customer_email,
+        customer_status=account.customer_status,
+        unique_id=account.unique_id,
         company_name=account.company.company_name,
+        contact_number=account.company.contact_number,
+        remark=account.company.remark,
         operator_name=account.operator.display_name if account.operator else None,
-        submitted_at=account.submitted_at,
+        submitted_time=account.submitted_time,
     )
 
 
@@ -33,7 +33,6 @@ def _to_out(account: Account) -> AccountOut:
 def list_accounts(
     status_filter: AccountStatus | None = Query(default=None, alias="status"),
     company: str | None = None,
-    role: str | None = None,
     search: str | None = None,
     sort: str = Query(default="newest", pattern="^(newest|oldest|name)$"),
     db: Session = Depends(get_db),
@@ -41,21 +40,19 @@ def list_accounts(
     query = db.query(Account).options(joinedload(Account.company), joinedload(Account.operator))
 
     if status_filter is not None:
-        query = query.filter(Account.status == status_filter)
+        query = query.filter(Account.customer_status == status_filter)
     if company:
         query = query.join(Customer).filter(Customer.company_name == company)
-    if role:
-        query = query.filter(Account.role == role)
     if search:
         like = f"%{search}%"
-        query = query.filter(or_(Account.name.ilike(like), Account.email.ilike(like)))
+        query = query.filter(or_(Account.customer_name.ilike(like), Account.customer_email.ilike(like)))
 
     if sort == "name":
-        query = query.order_by(Account.name.asc())
+        query = query.order_by(Account.customer_name.asc())
     elif sort == "oldest":
-        query = query.order_by(Account.submitted_at.asc())
+        query = query.order_by(Account.submitted_time.asc())
     else:
-        query = query.order_by(Account.submitted_at.desc())
+        query = query.order_by(Account.submitted_time.desc())
 
     accounts = query.all()
     return AccountListResponse(total=len(accounts), items=[_to_out(a) for a in accounts])
@@ -66,9 +63,9 @@ def account_summary(db: Session = Depends(get_db)) -> AccountSummary:
     all_accounts = db.query(Account).all()
     return AccountSummary(
         total=len(all_accounts),
-        active=sum(1 for a in all_accounts if a.status == AccountStatus.ACTIVE),
-        pending=sum(1 for a in all_accounts if a.status == AccountStatus.PENDING),
-        locked=sum(1 for a in all_accounts if a.status == AccountStatus.LOCKED),
+        active=sum(1 for a in all_accounts if a.customer_status == AccountStatus.ACTIVE),
+        pending=sum(1 for a in all_accounts if a.customer_status == AccountStatus.PENDING),
+        locked=sum(1 for a in all_accounts if a.customer_status == AccountStatus.LOCKED),
     )
 
 
@@ -94,12 +91,11 @@ def approve_account(
     account_id: int, db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
 ) -> AccountOut:
     account = _get_account_or_404(account_id, db)
-    account.status = AccountStatus.ACTIVE
-    account.operator_id = admin.id
+    account.customer_status = AccountStatus.ACTIVE
+    account.admin_id = admin.id
 
     # This is what actually clears the customer out of the Activation Queue.
-    account.company.is_activated = True
-    account.company.activated_at = datetime.now(timezone.utc)
+    account.company.activated_time = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(account)
@@ -126,8 +122,8 @@ def lock_account(
     account_id: int, db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
 ) -> AccountOut:
     account = _get_account_or_404(account_id, db)
-    account.status = AccountStatus.LOCKED
-    account.operator_id = admin.id
+    account.customer_status = AccountStatus.LOCKED
+    account.admin_id = admin.id
     db.commit()
     db.refresh(account)
     return _to_out(account)
@@ -138,8 +134,8 @@ def unlock_account(
     account_id: int, db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
 ) -> AccountOut:
     account = _get_account_or_404(account_id, db)
-    account.status = AccountStatus.ACTIVE
-    account.operator_id = admin.id
+    account.customer_status = AccountStatus.ACTIVE
+    account.admin_id = admin.id
     db.commit()
     db.refresh(account)
     return _to_out(account)

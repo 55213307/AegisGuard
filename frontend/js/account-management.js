@@ -4,7 +4,6 @@ const tableBody = document.getElementById("accountTableBody");
 const tabsBar = document.getElementById("amTabsBar");
 const searchInput = document.getElementById("accountSearch");
 const companyFilter = document.getElementById("companyFilter");
-const roleFilter = document.getElementById("roleFilter");
 const sortFilter = document.getElementById("sortFilter");
 const pagination = document.getElementById("pagination");
 const paginationSummary = document.getElementById("paginationSummary");
@@ -64,12 +63,11 @@ function createRowElement(account) {
 
   row.innerHTML = `
     <div class="am-row-name">
-      <span class="am-avatar">${getInitials(account.name)}</span>
-      <span class="am-row-name-text">${account.name}</span>
+      <span class="am-avatar">${getInitials(account.customer_name)}</span>
+      <span class="am-row-name-text">${account.customer_name}</span>
     </div>
     <div class="am-row-company">${account.company_name}</div>
-    <div class="am-row-role">${account.role}</div>
-    <div class="am-row-status"><span class="am-status-pill" data-status="${account.status}">${account.status}</span></div>
+    <div class="am-row-status"><span class="am-status-pill" data-status="${account.customer_status}">${account.customer_status}</span></div>
     <div class="am-row-actions">
       <button class="am-action-btn am-action-view" type="button">View</button>
       <button class="am-action-btn am-action-delete" type="button">Delete</button>
@@ -83,7 +81,6 @@ async function loadAccounts() {
   const params = new URLSearchParams();
   if (activeFilter !== "all") params.set("status", STATUS_MAP[activeFilter]);
   if (companyFilter.value) params.set("company", companyFilter.value);
-  if (roleFilter.value) params.set("role", roleFilter.value);
   if (searchInput.value.trim()) params.set("search", searchInput.value.trim());
   params.set("sort", sortFilter.value);
 
@@ -129,23 +126,23 @@ searchInput.addEventListener("input", () => {
   searchDebounceTimer = setTimeout(loadAccounts, 300);
 });
 
-[companyFilter, roleFilter, sortFilter].forEach((el) => {
+[companyFilter, sortFilter].forEach((el) => {
   el.addEventListener("change", loadAccounts);
 });
 
 function buildActionButtons(account) {
   drawerActions.innerHTML = "";
 
-  if (account.status === "Pending") {
+  if (account.customer_status === "Pending") {
     drawerActions.innerHTML = `
       <button class="am-drawer-btn am-btn-approve" type="button" data-action="approve">Approve</button>
       <button class="am-drawer-btn am-btn-reject" type="button" data-action="reject">Reject</button>
     `;
-  } else if (account.status === "Active") {
+  } else if (account.customer_status === "Active") {
     drawerActions.innerHTML = `
       <button class="am-drawer-btn am-btn-lock" type="button" data-action="lock">Lock Account</button>
     `;
-  } else if (account.status === "Locked") {
+  } else if (account.customer_status === "Locked") {
     drawerActions.innerHTML = `
       <button class="am-drawer-btn am-btn-unlock" type="button" data-action="unlock">Unlock Account</button>
     `;
@@ -155,22 +152,22 @@ function buildActionButtons(account) {
 function openDrawer(account) {
   drawer.dataset.accountId = account.id;
 
-  document.getElementById("drawerAvatar").textContent = getInitials(account.name);
-  document.getElementById("drawerName").textContent = account.name;
+  document.getElementById("drawerAvatar").textContent = getInitials(account.customer_name);
+  document.getElementById("drawerName").textContent = account.customer_name;
   document.getElementById("drawerCompanySub").textContent = account.company_name;
-  document.getElementById("drawerFullName").textContent = account.name;
-  document.getElementById("drawerEmail").textContent = account.email;
+  document.getElementById("drawerFullName").textContent = account.customer_name;
+  document.getElementById("drawerEmail").textContent = account.customer_email;
+  document.getElementById("drawerPhone").textContent = account.contact_number || "—";
   document.getElementById("drawerCompany").textContent = account.company_name;
-  document.getElementById("drawerRole").textContent = account.role;
-  document.getElementById("drawerDate").textContent = new Date(account.submitted_at).toLocaleDateString();
+  document.getElementById("drawerDate").textContent = new Date(account.submitted_time).toLocaleDateString();
   document.getElementById("drawerOperator").textContent = account.operator_name || "—";
-  document.getElementById("drawerRemarks").textContent = account.remarks
-    ? `Remarks: ${account.remarks}`
+  document.getElementById("drawerRemarks").textContent = account.remark
+    ? `Remarks: ${account.remark}`
     : "No additional remarks.";
 
   const pill = document.getElementById("drawerStatusPill");
-  pill.textContent = account.status;
-  pill.dataset.status = account.status;
+  pill.textContent = account.customer_status;
+  pill.dataset.status = account.customer_status;
 
   buildActionButtons(account);
 
@@ -193,7 +190,7 @@ tableBody.addEventListener("click", (event) => {
   if (event.target.closest(".am-action-view")) {
     openDrawer(account);
   } else if (event.target.closest(".am-action-delete")) {
-    if (!confirm(`Delete ${account.name}'s account? This cannot be undone.`)) return;
+    if (!confirm(`Delete ${account.customer_name}'s account? This cannot be undone.`)) return;
     apiFetch(`/api/accounts/${account.id}`, { method: "DELETE" })
       .then(() => {
         loadAccounts();

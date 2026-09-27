@@ -26,7 +26,7 @@ def get_current_admin(
     if username is None:
         raise unauthorized
 
-    admin = db.query(AdminUser).filter(AdminUser.username == username).first()
+    admin = db.query(AdminUser).filter(AdminUser.login_username == username).first()
     if admin is None:
         raise unauthorized
 

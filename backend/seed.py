@@ -14,13 +14,13 @@ from app.models.user import AdminUser
 def main() -> None:
     db = SessionLocal()
     try:
-        existing = db.query(AdminUser).filter(AdminUser.username == "tester1").first()
+        existing = db.query(AdminUser).filter(AdminUser.login_username == "tester1").first()
         if existing:
             print("tester1 already exists, skipping.")
             return
 
         admin = AdminUser(
-            username="tester1",
+            login_username="tester1",
             display_name="tester1",
             password_hash=hash_password("1234"),
         )

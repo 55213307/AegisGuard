@@ -194,7 +194,7 @@
 
 .am-table-header {
   display: grid;
-  grid-template-columns: 2fr 1.6fr 1.4fr 1fr 1.2fr;
+  grid-template-columns: 2fr 1.6fr 1fr 1.2fr;
   padding: 0 16px;
   font-family: "Inter", sans-serif;
   font-size: 12px;
@@ -214,7 +214,7 @@
 
 .am-row {
   display: grid;
-  grid-template-columns: 2fr 1.6fr 1.4fr 1fr 1.2fr;
+  grid-template-columns: 2fr 1.6fr 1fr 1.2fr;
   align-items: center;
   min-height: 56px;
   padding: 8px 16px;
@@ -249,8 +249,7 @@
   font-size: 15px;
 }
 
-.am-row-company,
-.am-row-role {
+.am-row-company {
   color: var(--text-secondary);
   font-size: 14px;
 }

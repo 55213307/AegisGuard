@@ -86,12 +86,13 @@ addCustomerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const formData = new FormData(addCustomerForm);
+  const areaCode = formData.get("areaCode") || "";
+  const rawNumber = formData.get("contactNumber")?.trim() || "";
   const payload = {
     company_name: formData.get("companyName")?.trim(),
-    contact_person: formData.get("contactPerson")?.trim() || null,
+    contact_name: formData.get("contactPerson")?.trim() || null,
     contact_email: formData.get("contactEmail")?.trim(),
-    area_code: formData.get("areaCode") || null,
-    contact_number: formData.get("contactNumber")?.trim() || null,
+    contact_number: rawNumber ? `${areaCode} ${rawNumber}`.trim() : null,
     remark: formData.get("remark")?.trim() || null,
   };
 

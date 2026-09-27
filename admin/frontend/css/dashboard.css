@@ -288,6 +288,166 @@ h2,
   min-height: 120px;
 }
 
+/* Customers Overview bar chart */
+.chart-body {
+  min-height: 210px;
+  padding: 4px 0 0;
+  align-items: stretch;
+}
+
+.growth-chart {
+  width: 100%;
+  height: 210px;
+  overflow: visible;
+}
+
+.growth-bar {
+  fill: var(--link-blue);
+  transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1), y 0.6s cubic-bezier(0.4, 0, 0.2, 1), fill 0.15s ease;
+}
+
+.growth-bar:hover {
+  fill: #fff;
+}
+
+.growth-axis-label {
+  fill: var(--text-muted);
+  font-family: "Inter", sans-serif;
+  font-size: 10px;
+}
+
+.growth-value-label {
+  fill: var(--text-primary);
+  font-family: "Jersey 10", monospace;
+  font-size: 13px;
+  text-anchor: middle;
+  opacity: 0;
+  transition: opacity 0.4s ease, y 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.growth-value-label.visible {
+  opacity: 1;
+}
+
+.growth-empty {
+  fill: var(--text-muted);
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  text-anchor: middle;
+}
+
+/* Account Status Distribution donut */
+.donut-body {
+  min-height: 120px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.status-donut {
+  width: 120px;
+  height: 120px;
+  flex-shrink: 0;
+}
+
+.status-donut circle {
+  transition: stroke-dasharray 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .growth-bar,
+  .growth-value-label,
+  .status-donut circle {
+    transition: none;
+  }
+}
+
+.donut-total-value {
+  fill: var(--text-primary);
+  font-family: "Jersey 10", monospace;
+  font-size: 28px;
+  text-anchor: middle;
+}
+
+.donut-total-label {
+  fill: var(--text-muted);
+  font-family: "Inter", sans-serif;
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.status-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.status-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-legend-count {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: "Jersey 10", monospace;
+  color: var(--text-primary);
+}
+
+/* Recent Administrative Activities */
+.activity-body {
+  min-height: 210px;
+  align-items: stretch;
+  padding: 0;
+}
+
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.activity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.activity-item:last-child {
+  border-bottom: none;
+}
+
+.activity-description {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.activity-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* Platform service status sub-cards */
 .service-grid {
   display: grid;

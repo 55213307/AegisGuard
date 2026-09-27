@@ -1,0 +1,36 @@
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.log-search {
+  width: 320px;
+  max-width: 100%;
+}
+
+.data-table th:nth-child(1),
+.data-table td:nth-child(1) {
+  width: 140px;
+}
+
+.data-table th:nth-child(2),
+.data-table td:nth-child(2) {
+  width: 120px;
+}
+
+.data-table th:nth-child(3),
+.data-table td:nth-child(3) {
+  width: 90px;
+}
+
+.data-table th:nth-child(4),
+.data-table td:nth-child(4) {
+  width: 150px;
+}
+
+.data-table th:nth-child(5),
+.data-table td:nth-child(5) {
+  width: 100px;
+}

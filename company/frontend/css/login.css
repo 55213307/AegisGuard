@@ -1,0 +1,122 @@
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background:
+    radial-gradient(circle at 12% 85%, rgba(47, 111, 235, 0.12), transparent 40%),
+    radial-gradient(circle at 92% 8%, rgba(47, 111, 235, 0.14), transparent 35%),
+    var(--bg-page);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 40px 36px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.login-logo {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 28px;
+}
+
+.login-heading {
+  font-size: 26px;
+}
+
+.login-subtitle {
+  margin: 6px 0 28px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: 0.1px;
+  color: var(--text-secondary);
+}
+
+.login-field-input {
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface-alt);
+  color: var(--text-primary);
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.login-field-input::placeholder {
+  color: var(--text-muted);
+}
+
+.login-field-input:focus {
+  border-color: var(--brand-blue-light);
+}
+
+.login-field-input.error {
+  border-color: var(--danger-text);
+  background: rgba(251, 113, 133, 0.08);
+}
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+
+.login-card.shake {
+  animation: shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.login-submit {
+  width: 100%;
+  padding: 13px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--brand-blue);
+  color: var(--text-primary);
+  font-family: "Inter", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  transition: filter 0.15s ease;
+}
+
+.login-submit:hover {
+  filter: brightness(1.08);
+}
+
+.login-submit:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.login-error {
+  margin: 0;
+  min-height: 18px;
+  color: var(--danger-text);
+  font-size: 13px;
+  text-align: center;
+}

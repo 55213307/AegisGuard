@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AegisGuard | Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/shared.css" />
+<link rel="stylesheet" href="css/dashboard.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <img class="sidebar-logo" src="../../resources/logoNonBackground.png" alt="AegisGuard" />
+
+      <nav class="nav-list">
+        <a class="nav-item active" href="dashboard.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item" href="live-monitoring.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+          <span>Live Monitoring</span>
+        </a>
+        <a class="nav-item" href="account-management.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3 2.5-5.2 5.5-5.2s5.5 2.2 5.5 5.2"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.2 4.2 2.1 4.2 4.9"/></svg>
+          <span>Account Management</span>
+        </a>
+        <a class="nav-item" href="security-logs.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
+          <span>Security Logs</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+
+      <button class="nav-item nav-logout" type="button" id="logoutBtn">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H9"/><path d="M14 16.5 19 12l-5-4.5M19 12H9"/></svg>
+        <span>Log Out</span>
+      </button>
+    </aside>
+
+    <main class="main-content">
+      <section class="hero-banner">
+        <div class="hero-top">
+          <h1 class="page-title font-tech" id="welcomeHeading">Good Afternoon, Admin</h1>
+          <span class="hero-badge">Welcome back</span>
+        </div>
+        <p class="hero-subtitle">Monitor your endpoints, manage accounts, and keep the enterprise secure.</p>
+      </section>
+
+      <section class="stats-grid">
+        <article class="stat-card">
+          <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+          <p class="stat-value" data-stat="totalEndpoints">--</p>
+          <p class="stat-label">Total Endpoints</p>
+        </article>
+        <article class="stat-card">
+          <svg class="stat-icon stat-icon-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m5 12.5 4.5 4.5L19 7"/></svg>
+          <p class="stat-value" data-stat="normalEndpoints">--</p>
+          <p class="stat-label">Normal</p>
+        </article>
+        <article class="stat-card">
+          <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2M11 7.5V11l2.5 1.5"/></svg>
+          <p class="stat-value" data-stat="monitoringEndpoints">--</p>
+          <p class="stat-label">Monitoring</p>
+        </article>
+        <article class="stat-card">
+          <svg class="stat-icon stat-icon-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5.5" y="10.5" width="13" height="9" rx="1.6"/><path d="M8.5 10.5V7.8a3.5 3.5 0 0 1 7 0v2.7"/></svg>
+          <p class="stat-value" data-stat="lockedEndpoints">--</p>
+          <p class="stat-label">Locked</p>
+        </article>
+        <article class="stat-card">
+          <svg class="stat-icon stat-icon-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>
+          <p class="stat-value" data-stat="pendingEndpoints">--</p>
+          <p class="stat-label">Pending</p>
+        </article>
+        <article class="stat-card">
+          <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 13.5 8 8l4 5 4-6 4 4.5"/><path d="M4 19h16"/></svg>
+          <p class="stat-value stat-value-text" data-stat="platformStatus">--</p>
+          <p class="stat-label">Platform Status</p>
+        </article>
+      </section>
+
+      <section class="panels-row">
+        <div class="panel panel-grow">
+          <div class="panel-header">
+            <h2 class="panel-title font-tech">Endpoints Overview</h2>
+            <a class="panel-link" href="live-monitoring.html">View All &rarr;</a>
+          </div>
+          <div class="panel-placeholder" id="endpointsChartBody">
+            Endpoint activity chart will render here once the reporting API is connected.
+          </div>
+        </div>
+        <div class="panel panel-side">
+          <div class="panel-header">
+            <h2 class="panel-title font-tech">Account Status Distribution</h2>
+          </div>
+          <div class="panel-placeholder" id="statusDonutBody">
+            Donut chart placeholder.
+          </div>
+        </div>
+      </section>
+
+      <section class="panels-row">
+        <div class="panel panel-grow">
+          <div class="panel-header">
+            <h2 class="panel-title font-tech">Platform Service Status</h2>
+            <a class="panel-link" href="#">View Details &rarr;</a>
+          </div>
+          <div class="service-grid" id="serviceGrid">
+            <div class="service-card">
+              <span class="service-dot" data-status="unknown"></span>
+              <p class="service-name">API Server</p>
+              <p class="service-state">--</p>
+            </div>
+            <div class="service-card">
+              <span class="service-dot" data-status="unknown"></span>
+              <p class="service-name">Database</p>
+              <p class="service-state">--</p>
+            </div>
+            <div class="service-card">
+              <span class="service-dot" data-status="unknown"></span>
+              <p class="service-name">ML Engine</p>
+              <p class="service-state">--</p>
+            </div>
+            <div class="service-card">
+              <span class="service-dot" data-status="unknown"></span>
+              <p class="service-name">File Storage</p>
+              <p class="service-state">--</p>
+            </div>
+          </div>
+        </div>
+        <div class="panel panel-side">
+          <div class="panel-header">
+            <h2 class="panel-title font-tech">Recent Alerts</h2>
+          </div>
+          <ul class="alert-list" id="alertList"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/sidebar.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>

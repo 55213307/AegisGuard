@@ -383,7 +383,9 @@
   right: 0;
   height: 100%;
   width: min(460px, 92vw);
-  background: var(--am-panel-bg);
+  background: rgba(27, 31, 42, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-left: 1px solid var(--am-panel-border);
   padding: 28px;
   display: flex;

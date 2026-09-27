@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AegisGuard | Account Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/shared.css" />
+<link rel="stylesheet" href="css/account-management.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <img class="sidebar-logo" src="../../resources/logoNonBackground.png" alt="AegisGuard" />
+
+      <nav class="nav-list">
+        <a class="nav-item" href="dashboard.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item" href="live-monitoring.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+          <span>Live Monitoring</span>
+        </a>
+        <a class="nav-item active" href="account-management.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3 2.5-5.2 5.5-5.2s5.5 2.2 5.5 5.2"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.2 4.2 2.1 4.2 4.9"/></svg>
+          <span>Account Management</span>
+        </a>
+        <a class="nav-item" href="security-logs.html">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
+          <span>Security Logs</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+
+      <button class="nav-item nav-logout" type="button" id="logoutBtn">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H9"/><path d="M14 16.5 19 12l-5-4.5M19 12H9"/></svg>
+        <span>Log Out</span>
+      </button>
+    </aside>
+
+    <main class="main-content">
+      <div class="topbar">
+        <div>
+          <h1 class="page-title font-tech">Account Management</h1>
+          <p class="page-subtitle">Create, block, unblock, or remove user accounts</p>
+        </div>
+        <button class="btn btn-primary" type="button" id="openCreateAccountBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg>
+          Create Account
+        </button>
+      </div>
+
+      <label class="control account-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2"/></svg>
+        <input type="text" id="accountSearchInput" placeholder="Search by username or email" />
+      </label>
+
+      <div class="panel">
+        <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Last Login</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="accountsTableBody">
+            <tr><td colspan="6" class="empty-state">Loading accounts&hellip;</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-scrim" id="createAccountScrim">
+    <form class="modal" id="createAccountForm" novalidate>
+      <div class="modal-header">
+        <h2 class="modal-title font-tech">Create Account</h2>
+        <button class="modal-close" type="button" id="closeCreateAccountBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+
+      <div class="form-field">
+        <label class="form-label" for="newUsername">Username</label>
+        <input class="form-input" type="text" id="newUsername" name="username" placeholder="e.g. j.tan" required />
+      </div>
+
+      <div class="form-field">
+        <label class="form-label" for="newEmail">Email Address</label>
+        <input class="form-input" type="email" id="newEmail" name="email" placeholder="name@corp.com" required />
+      </div>
+
+      <div class="form-field">
+        <label class="form-label" for="newRole">Role</label>
+        <select class="form-select" id="newRole" name="role">
+          <option value="employee">Employee</option>
+          <option value="administrator">Administrator</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label class="form-label" for="newPassword">Temporary Password</label>
+        <input class="form-input" type="text" id="newPassword" name="password" placeholder="Auto-generate secure password" />
+      </div>
+
+      <p class="form-error" id="createAccountError"></p>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" id="cancelCreateAccountBtn">Cancel</button>
+        <button class="btn btn-primary" type="submit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg>
+          Create Account
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/sidebar.js"></script>
+  <script src="js/account-management.js"></script>
+</body>
+</html>

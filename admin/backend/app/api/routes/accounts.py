@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import get_current_admin
 from app.db.session import get_db
 from app.models.account import Account, AccountStatus
+from app.models.activity_log import ActivityLog
 from app.models.customer import Customer
 from app.models.user import AdminUser
 from app.schemas.account import AccountListResponse, AccountOut, AccountSummary
@@ -97,13 +98,17 @@ def approve_account(
     # This is what actually clears the customer out of the Activation Queue.
     account.company.activated_time = datetime.now(timezone.utc)
 
+    db.add(ActivityLog(admin_id=admin.id, description=f"Approved account for \"{account.company.company_name}\""))
+
     db.commit()
     db.refresh(account)
     return _to_out(account)
 
 
 @router.post("/{account_id}/reject", status_code=204)
-def reject_account(account_id: int, db: Session = Depends(get_db)) -> None:
+def reject_account(
+    account_id: int, db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
+) -> None:
     # A rejected Pending account has no place in the UI (only Pending/Active/
     # Locked are ever shown), so rejecting removes the request outright.
     # The customer itself goes too: it has no account left after this, which
@@ -112,6 +117,7 @@ def reject_account(account_id: int, db: Session = Depends(get_db)) -> None:
     # created this account in the first place).
     account = _get_account_or_404(account_id, db)
     customer = account.company
+    db.add(ActivityLog(admin_id=admin.id, description=f"Rejected account request for \"{customer.company_name}\""))
     db.delete(account)
     db.delete(customer)
     db.commit()
@@ -124,6 +130,7 @@ def lock_account(
     account = _get_account_or_404(account_id, db)
     account.customer_status = AccountStatus.LOCKED
     account.admin_id = admin.id
+    db.add(ActivityLog(admin_id=admin.id, description=f"Locked account for \"{account.company.company_name}\""))
     db.commit()
     db.refresh(account)
     return _to_out(account)
@@ -136,13 +143,23 @@ def unlock_account(
     account = _get_account_or_404(account_id, db)
     account.customer_status = AccountStatus.ACTIVE
     account.admin_id = admin.id
+    db.add(ActivityLog(admin_id=admin.id, description=f"Unlocked account for \"{account.company.company_name}\""))
     db.commit()
     db.refresh(account)
     return _to_out(account)
 
 
 @router.delete("/{account_id}", status_code=204)
-def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
+def delete_account(
+    account_id: int, db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
+) -> None:
+    # Same reasoning as reject_account: an account never exists without its
+    # customer, so deleting only the account would leave that customer with
+    # zero accounts — indistinguishable from "not yet activated" — and it
+    # would be stuck in the Activation Queue forever with no way out.
     account = _get_account_or_404(account_id, db)
+    customer = account.company
+    db.add(ActivityLog(admin_id=admin.id, description=f"Deleted account for \"{customer.company_name}\""))
     db.delete(account)
+    db.delete(customer)
     db.commit()

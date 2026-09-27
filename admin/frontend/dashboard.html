@@ -82,10 +82,10 @@
           <div class="panel">
             <div class="panel-header">
               <h2 class="panel-title">Customers Overview</h2>
-              <a class="panel-link" href="customer-management.html">View All &rarr;</a>
+              <a class="panel-link" href="account-management.html">View All &rarr;</a>
             </div>
-            <div class="panel-body placeholder-body">
-              <p>Customer growth chart will render here once the reporting API is connected.</p>
+            <div class="panel-body chart-body" id="growthChartBody">
+              <svg class="growth-chart" id="growthChart" viewBox="0 0 640 200" preserveAspectRatio="none" role="img" aria-label="New customers per day, last 14 days"></svg>
             </div>
           </div>
 
@@ -124,8 +124,9 @@
             <div class="panel-header">
               <h2 class="panel-title">Account Status Distribution</h2>
             </div>
-            <div class="panel-body placeholder-body small">
-              <p>Donut chart placeholder.</p>
+            <div class="panel-body donut-body" id="statusDonutBody">
+              <svg class="status-donut" id="statusDonut" viewBox="0 0 140 140" role="img" aria-label="Account status distribution"></svg>
+              <ul class="status-legend" id="statusLegend"></ul>
             </div>
           </div>
 
@@ -133,8 +134,8 @@
             <div class="panel-header">
               <h2 class="panel-title">Recent Administrative Activities</h2>
             </div>
-            <div class="panel-body placeholder-body">
-              <p>Activity log placeholder &mdash; will list the latest admin actions once the audit API is ready.</p>
+            <div class="panel-body activity-body" id="activityBody">
+              <ul class="activity-list" id="activityList"></ul>
             </div>
           </div>
         </div>

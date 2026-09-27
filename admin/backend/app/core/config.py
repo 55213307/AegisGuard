@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480
 
-    # Frontend build lives one level up in AegisGuard/frontend.
+    # Frontend build lives one level up, in AegisGuard/admin/frontend.
     frontend_dir: str = "../frontend"
 
 

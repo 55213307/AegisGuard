@@ -7,7 +7,7 @@ app runs as one process.
 ## Setup
 
 ```bash
-cd AegisGuard/backend
+cd AegisGuard/admin/backend
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 pip install -r requirements.txt
@@ -15,7 +15,6 @@ pip install -r requirements.txt
 copy .env.example .env          # then fill in DATABASE_URL / JWT_SECRET_KEY
 
 # create the database first (e.g. via psql: CREATE DATABASE aegisguard;)
-alembic revision --autogenerate -m "init schema"
 alembic upgrade head
 
 python seed.py                  # creates tester1 / 1234 for local login
@@ -41,26 +40,29 @@ seed.py       creates a local dev admin account
 
 All except `/api/auth/login` require `Authorization: Bearer <token>`.
 
-- `POST /api/auth/login` — matches login.html's form fields exactly
+- `POST /api/auth/login`
 - `GET  /api/dashboard/summary` — feeds the dashboard's stat cards
 - `GET  /api/customers` — full company list (for the account filter dropdown)
-- `GET  /api/customers/queue` — FIFO activation queue (frontend caps display to 4)
-- `POST /api/customers` — Add New Customer form
-- `POST /api/customers/{id}/activate`
-- `GET  /api/accounts` — supports `status`, `company`, `role`, `search`, `sort`
+- `GET  /api/customers/queue` — read-only FIFO activation queue (frontend caps display to 4);
+  a customer leaves the queue once its account is approved (Active) in Account Management
+- `POST /api/customers` — Add New Customer form; also creates that customer's one account (Pending)
+- `GET  /api/accounts` — supports `status`, `company`, `search`, `sort`
 - `GET  /api/accounts/summary` — feeds Account Management's stat cards
 - `GET  /api/accounts/{id}`
 - `POST /api/accounts/{id}/approve|reject|lock|unlock`
 - `DELETE /api/accounts/{id}`
 
-## Known assumptions (flag if wrong)
+## Business rules
 
-- "Reject" on a Pending account deletes it outright — the UI only ever shows
-  Pending/Active/Locked, there's no "Rejected" status anywhere in the design.
-- Dashboard's "Monitoring Accounts" stat = count of Active accounts;
-  "Platform Status" is currently hardcoded to "Operational" pending a real
+- One customer has exactly one account (`accounts.unique_id` is UNIQUE) — there's no
+  multi-account-per-company or role distinction.
+- Rejecting an account deletes the customer too (there's no re-request flow).
+- Column names follow the project's hand-drawn ERD exactly (`login_username`, `contact_name`,
+  `customer_status`, `unique_id`, `admin_id`, etc.) — see the project memory for the full mapping.
+
+## Known gaps
+
+- Dashboard's "Platform Status" is hardcoded to "Operational" pending a real
   Wazuh/worker health check.
-- The frontend (`login.js`, `dashboard.js`, `customer-management.js`,
-  `account-management.js`) still uses local fake data / `fakeAuthenticate()`.
-  Wiring those `fetch()` calls to these endpoints is the next step, not done
-  in this pass.
+- Customers Overview chart, Account Status Distribution chart, and Recent Administrative
+  Activities are frontend placeholders — no reporting/audit-log API exists yet.

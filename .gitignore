@@ -1,5 +1,5 @@
-backend/.venv/
-backend/__pycache__/
-backend/**/__pycache__/
-backend/.env
-backend/*.db
+admin/backend/.venv/
+admin/backend/__pycache__/
+admin/backend/**/__pycache__/
+admin/backend/.env
+admin/backend/*.db

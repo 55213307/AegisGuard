@@ -134,7 +134,7 @@ h2,
   border-radius: var(--radius-lg);
   border: 1px solid var(--panel-border);
   background: linear-gradient(rgba(19, 21, 25, 0.72), rgba(19, 21, 25, 0.72)),
-    url("../../resources/welcomeBackground.png");
+    url("../../../resources/welcomeBackground.png");
   background-size: cover;
   background-position: center;
   backdrop-filter: blur(12px);

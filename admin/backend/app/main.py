@@ -22,9 +22,10 @@ app.include_router(dashboard.router)
 app.include_router(customers.router)
 app.include_router(accounts.router)
 
-# The frontend HTML references shared assets (e.g. the logo) via "../resources",
-# one level above the frontend dir, so that path must be served too.
-app.mount("/resources", StaticFiles(directory=f"{settings.frontend_dir}/../resources"), name="resources")
+# The frontend HTML references shared assets (e.g. the logo) via "../../resources"
+# (frontend lives at AegisGuard/admin/frontend, resources at AegisGuard/resources),
+# so that path must be served too.
+app.mount("/resources", StaticFiles(directory="../../resources"), name="resources")
 
 # Serves the existing plain HTML/CSS/JS frontend (AegisGuard/frontend) as
 # static files, per the IR's chosen architecture (FastAPI + static/Jinja2

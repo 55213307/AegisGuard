@@ -2,12 +2,24 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin
+from app.core.security import (
+    build_company_login_url,
+    generate_initial_password,
+    generate_login_token,
+    hash_password,
+)
 from app.db.session import get_db
 from app.models.account import Account, AccountStatus
 from app.models.activity_log import ActivityLog
 from app.models.customer import Customer
 from app.models.user import AdminUser
-from app.schemas.customer import CustomerCreate, CustomerOut, QueueResponse
+from app.schemas.customer import (
+    CustomerCreate,
+    CustomerCreatedOut,
+    CustomerOut,
+    PortalCredentials,
+    QueueResponse,
+)
 
 router = APIRouter(prefix="/api/customers", tags=["customers"], dependencies=[Depends(get_current_admin)])
 
@@ -42,22 +54,28 @@ def get_activation_queue(db: Session = Depends(get_db)) -> QueueResponse:
     return QueueResponse(total=len(items), items=items)
 
 
-@router.post("", response_model=CustomerOut, status_code=201)
+@router.post("", response_model=CustomerCreatedOut, status_code=201)
 def create_customer(
     payload: CustomerCreate, db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
-) -> Customer:
+) -> CustomerCreatedOut:
     customer = Customer(**payload.model_dump())
     db.add(customer)
     db.flush()  # assigns customer.id for the account's FK below
 
     # Registering a customer immediately registers its one account, Pending
-    # until approved in Account Management.
+    # until approved in Account Management. Its portal credentials are issued
+    # now, but login is refused until the account is Active.
+    initial_password = generate_initial_password()
+    login_token = generate_login_token()
     db.add(
         Account(
             customer_name=customer.contact_name or customer.company_name,
             customer_email=customer.contact_email,
             customer_status=AccountStatus.PENDING,
             unique_id=customer.id,
+            login_token=login_token,
+            password_hash=hash_password(initial_password),
+            must_change_password=True,
         )
     )
     db.add(
@@ -69,4 +87,11 @@ def create_customer(
 
     db.commit()
     db.refresh(customer)
-    return customer
+    return CustomerCreatedOut(
+        **CustomerOut.model_validate(customer).model_dump(),
+        credentials=PortalCredentials(
+            login_url=build_company_login_url(login_token),
+            login_username=customer.company_name,
+            initial_password=initial_password,
+        ),
+    )

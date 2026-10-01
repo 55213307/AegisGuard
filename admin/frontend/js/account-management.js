@@ -147,6 +147,16 @@ function buildActionButtons(account) {
       <button class="am-drawer-btn am-btn-unlock" type="button" data-action="unlock">Unlock Account</button>
     `;
   }
+
+  drawerActions.insertAdjacentHTML(
+    "beforeend",
+    `<button class="am-drawer-btn am-btn-lock" type="button" data-action="reset-password">Reset Password</button>`
+  );
+}
+
+function describePasswordState(account) {
+  if (!account.has_password) return "Not issued — use Reset Password";
+  return account.must_change_password ? "Issued, not yet changed" : "Changed by company";
 }
 
 function openDrawer(account) {
@@ -161,6 +171,8 @@ function openDrawer(account) {
   document.getElementById("drawerCompany").textContent = account.company_name;
   document.getElementById("drawerDate").textContent = new Date(account.submitted_time).toLocaleDateString();
   document.getElementById("drawerOperator").textContent = account.operator_name || "—";
+  document.getElementById("drawerPasswordState").textContent = describePasswordState(account);
+  document.getElementById("drawerLoginUrl").textContent = account.login_url;
   document.getElementById("drawerRemarks").textContent = account.remark
     ? `Remarks: ${account.remark}`
     : "No additional remarks.";
@@ -206,6 +218,22 @@ drawerActions.addEventListener("click", async (event) => {
 
   const accountId = drawer.dataset.accountId;
   const action = btn.dataset.action;
+
+  if (action === "reset-password") {
+    if (!confirm("Issue a new portal password? The current one will stop working immediately.")) return;
+    btn.disabled = true;
+    try {
+      const credentials = await apiFetch(`/api/accounts/${accountId}/reset-password`, { method: "POST" });
+      closeDrawer();
+      loadAccounts();
+      showPortalCredentials(credentials, { title: `New Password for ${credentials.login_username}` });
+    } catch (err) {
+      alert(err.message || "Could not reset the password. Please try again.");
+      btn.disabled = false;
+    }
+    return;
+  }
+
   btn.disabled = true;
 
   try {

@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -31,6 +31,14 @@ class Account(Base):
 
     unique_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), unique=True)
     company: Mapped["Customer"] = relationship(back_populates="account")  # noqa: F821
+
+    # Company portal login. The username is the company's name; login_token
+    # is the unguessable part of this company's own login URL. password_hash
+    # is NULL until an admin issues credentials (see reset-password), and the
+    # company must replace the issued password on first login.
+    login_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
 
     admin_id: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id"), nullable=True)
     operator: Mapped["AdminUser | None"] = relationship()  # noqa: F821

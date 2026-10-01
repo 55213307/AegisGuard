@@ -3,3 +3,6 @@ admin/backend/__pycache__/
 admin/backend/**/__pycache__/
 admin/backend/.env
 admin/backend/*.db
+company/backend/.venv/
+company/backend/**/__pycache__/
+company/backend/.env

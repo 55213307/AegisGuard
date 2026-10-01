@@ -103,14 +103,14 @@
       <div class="form-field">
         <label class="form-label" for="newRole">Role</label>
         <select class="form-select" id="newRole" name="role">
-          <option value="employee">Employee</option>
-          <option value="administrator">Administrator</option>
+          <option value="Employee">Employee</option>
+          <option value="Administrator">Administrator</option>
         </select>
       </div>
 
       <div class="form-field">
         <label class="form-label" for="newPassword">Temporary Password</label>
-        <input class="form-input" type="text" id="newPassword" name="password" placeholder="Auto-generate secure password" />
+        <input class="form-input" type="text" id="newPassword" name="password" placeholder="Auto-generate secure password" autocomplete="off" />
       </div>
 
       <p class="form-error" id="createAccountError"></p>
@@ -123,6 +123,40 @@
         </button>
       </div>
     </form>
+  </div>
+
+  <div class="modal-scrim" id="credentialsScrim">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="credentialsTitle">
+      <div class="modal-header">
+        <h2 class="modal-title font-tech" id="credentialsTitle">Account Created</h2>
+      </div>
+      <p class="modal-helper">Give these to the employee. The password is shown only once and must be changed on first login.</p>
+      <dl class="cred-list">
+        <div class="cred-row"><dt>Login URL</dt><dd><code id="credUrl"></code><button class="btn btn-ghost btn-sm" type="button" data-copy="credUrl">Copy</button></dd></div>
+        <div class="cred-row"><dt>Username</dt><dd><code id="credUsername"></code><button class="btn btn-ghost btn-sm" type="button" data-copy="credUsername">Copy</button></dd></div>
+        <div class="cred-row"><dt>Temporary Password</dt><dd><code id="credPassword"></code><button class="btn btn-ghost btn-sm" type="button" data-copy="credPassword">Copy</button></dd></div>
+      </dl>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" id="copyAllCredentialsBtn">Copy All</button>
+        <button class="btn btn-primary" type="button" id="closeCredentialsBtn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-scrim" id="detailScrim">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detailUsername">
+      <div class="modal-header">
+        <h2 class="modal-title font-tech" id="detailUsername"></h2>
+        <button class="modal-close" type="button" id="closeDetailBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <dl class="cred-list" id="detailFields"></dl>
+      <p class="form-error" id="detailError"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" id="resetPasswordBtn">Reset Password</button>
+      </div>
+    </div>
   </div>
 
   <script src="js/api.js"></script>

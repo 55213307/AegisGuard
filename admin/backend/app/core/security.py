@@ -1,3 +1,5 @@
+import secrets
+import string
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
@@ -14,6 +16,26 @@ def hash_password(plain_password: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
+
+
+# Look-alike characters (0/O, 1/l/I) are left out because admins hand these
+# passwords to customers, who type them in by hand.
+_PASSWORD_ALPHABET = "".join(c for c in string.ascii_letters + string.digits if c not in "0O1lI")
+
+
+def generate_initial_password(length: int = 12) -> str:
+    while True:
+        password = "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(length))
+        if any(c.isalpha() for c in password) and any(c.isdigit() for c in password):
+            return password
+
+
+def generate_login_token() -> str:
+    return secrets.token_urlsafe(16)
+
+
+def build_company_login_url(login_token: str) -> str:
+    return f"{settings.company_portal_url.rstrip('/')}/login.html?c={login_token}"
 
 
 def create_access_token(subject: str) -> str:

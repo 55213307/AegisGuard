@@ -16,6 +16,9 @@ class AccountOut(BaseModel):
     remark: str | None
     operator_name: str | None
     submitted_time: datetime
+    login_url: str
+    has_password: bool
+    must_change_password: bool
 
     model_config = {"from_attributes": True}
 

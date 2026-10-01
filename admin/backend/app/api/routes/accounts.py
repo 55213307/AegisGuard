@@ -5,12 +5,14 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_admin
+from app.core.security import build_company_login_url, generate_initial_password, hash_password
 from app.db.session import get_db
 from app.models.account import Account, AccountStatus
 from app.models.activity_log import ActivityLog
 from app.models.customer import Customer
 from app.models.user import AdminUser
 from app.schemas.account import AccountListResponse, AccountOut, AccountSummary
+from app.schemas.customer import PortalCredentials
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"], dependencies=[Depends(get_current_admin)])
 
@@ -27,6 +29,9 @@ def _to_out(account: Account) -> AccountOut:
         remark=account.company.remark,
         operator_name=account.operator.display_name if account.operator else None,
         submitted_time=account.submitted_time,
+        login_url=build_company_login_url(account.login_token),
+        has_password=account.password_hash is not None,
+        must_change_password=account.must_change_password,
     )
 
 
@@ -147,6 +152,28 @@ def unlock_account(
     db.commit()
     db.refresh(account)
     return _to_out(account)
+
+
+@router.post("/{account_id}/reset-password", response_model=PortalCredentials)
+def reset_account_password(
+    account_id: int, db: Session = Depends(get_db), admin: AdminUser = Depends(get_current_admin)
+) -> PortalCredentials:
+    """Issues a fresh random portal password (the old one stops working) and
+    forces the company to change it on next login. Also how accounts that
+    predate portal logins get their first password."""
+    account = _get_account_or_404(account_id, db)
+    new_password = generate_initial_password()
+    account.password_hash = hash_password(new_password)
+    account.must_change_password = True
+    db.add(
+        ActivityLog(admin_id=admin.id, description=f"Reset portal password for \"{account.company.company_name}\"")
+    )
+    db.commit()
+    return PortalCredentials(
+        login_url=build_company_login_url(account.login_token),
+        login_username=account.company.company_name,
+        initial_password=new_password,
+    )
 
 
 @router.delete("/{account_id}", status_code=204)

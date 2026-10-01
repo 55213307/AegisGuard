@@ -12,5 +12,9 @@ class Settings(BaseSettings):
     # Frontend build lives one level up, in AegisGuard/admin/frontend.
     frontend_dir: str = "../frontend"
 
+    # Base URL of the company portal (AegisGuard/company/backend), used to
+    # build each company's own login link.
+    company_portal_url: str = "http://localhost:8002"
+
 
 settings = Settings()

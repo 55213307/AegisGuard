@@ -564,3 +564,8 @@
     gap: 8px;
   }
 }
+
+.am-login-url {
+  word-break: break-all;
+  user-select: all;
+}

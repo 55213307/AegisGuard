@@ -25,6 +25,19 @@ class CustomerOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PortalCredentials(BaseModel):
+    """Company portal login details. initial_password is only ever returned
+    at the moment it's generated — only its hash is stored."""
+
+    login_url: str
+    login_username: str
+    initial_password: str
+
+
+class CustomerCreatedOut(CustomerOut):
+    credentials: PortalCredentials
+
+
 class QueueResponse(BaseModel):
     """Full FIFO queue — the frontend decides how many of these to render."""
 

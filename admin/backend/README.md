@@ -46,10 +46,15 @@ All except `/api/auth/login` require `Authorization: Bearer <token>`.
 - `GET  /api/customers/queue` — read-only FIFO activation queue (frontend caps display to 4);
   a customer leaves the queue once its account is approved (Active) in Account Management
 - `POST /api/customers` — Add New Customer form; also creates that customer's one account (Pending)
+  and returns its company portal credentials (login URL, username = company name, one-time
+  random password — only its hash is stored)
 - `GET  /api/accounts` — supports `status`, `company`, `search`, `sort`
 - `GET  /api/accounts/summary` — feeds Account Management's stat cards
 - `GET  /api/accounts/{id}`
 - `POST /api/accounts/{id}/approve|reject|lock|unlock`
+- `POST /api/accounts/{id}/reset-password` — issues a new random portal password; the company
+  must change it on next login. Accounts created before portal logins existed have no password
+  until this is used.
 - `DELETE /api/accounts/{id}`
 
 ## Business rules
@@ -59,6 +64,9 @@ All except `/api/auth/login` require `Authorization: Bearer <token>`.
 - Rejecting an account deletes the customer too (there's no re-request flow).
 - Column names follow the project's hand-drawn ERD exactly (`login_username`, `contact_name`,
   `customer_status`, `unique_id`, `admin_id`, etc.) — see the project memory for the full mapping.
+
+`COMPANY_PORTAL_URL` (optional, default `http://localhost:8002`) sets the base of the issued
+company login links; it must match where `company/backend` runs.
 
 ## Known gaps
 

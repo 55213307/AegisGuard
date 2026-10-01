@@ -14,6 +14,17 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# Tables owned and migrated by company/backend (same database, separate
+# "alembic_version_company" history). Autogenerate must not try to drop them.
+COMPANY_OWNED_TABLES = {"employees", "alembic_version_company"}
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    if type_ == "table":
+        return name not in COMPANY_OWNED_TABLES
+    table = getattr(obj, "table", None)
+    return table is None or table.name not in COMPANY_OWNED_TABLES
+
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
@@ -22,6 +33,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -34,7 +46,7 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
         with context.begin_transaction():
             context.run_migrations()
 

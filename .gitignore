@@ -6,3 +6,4 @@ admin/backend/*.db
 company/backend/.venv/
 company/backend/**/__pycache__/
 company/backend/.env
+**/.env.local-backup

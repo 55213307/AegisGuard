@@ -23,6 +23,24 @@ uvicorn app.main:app --reload --port 8002
 The port must match `COMPANY_PORTAL_URL` in the admin backend's settings
 (default `http://localhost:8002`), since that's what the issued login links point to.
 
+## Development and deployment workflow
+
+The Windows checkout is the source of truth; the Ubuntu server
+(`portal.aegisguard.internal`, see `../deploy/`) only receives copies. There is
+one database, on the server: locally both admin and this backend reach it
+through an SSH tunnel (`.env` → `localhost:5433`):
+
+```bash
+ssh -N -L 5433:127.0.0.1:5432 shuyang@192.168.241.87
+```
+
+1. Open the tunnel, edit code on Windows, test locally on port 8002.
+2. New DB change? `alembic revision --autogenerate -m "..."` — commit the file;
+   the deploy script applies it on the server.
+3. Deploy: `powershell -ExecutionPolicy Bypass -File ..\deploy\deploy.ps1`
+   (packs company + resources without `.venv`/`.env`, uploads, reinstalls
+   dependencies, runs migrations, restarts `aegisguard-company`).
+
 ## Login flow
 
 1. An admin creates a company in Customer Management. That issues the company's

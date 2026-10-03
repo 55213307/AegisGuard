@@ -54,31 +54,58 @@ ssh -N -L 5433:127.0.0.1:5432 shuyang@192.168.241.87
 
 ## Employee accounts
 
-Administrators (the company account itself, or employees with role
-Administrator) manage the company's employee logins on the portal's Account
-Management page. Employees sign in through the same company login link with
-their own username and an issued temporary password (forced change on first
-login). Role `Employee` can use the portal but not Account Management.
-Locking an employee (or the whole company in the admin panel) ends their open
-sessions immediately. An administrator can't lock/delete/reset their own account.
+The company account (the only portal login) manages its employees on the
+Account Management page. Employees don't sign in anywhere: each one is a
+monitored computer (see "Endpoint installers" below). The page's View dialog
+follows the Figma endpoint-detail design and shows the computer's live state
+from Wazuh (online/offline, IP, OS, agent version, last seen).
 
-The `employees` table is owned by this backend: its migrations live in
-`alembic/` and are tracked in a separate `alembic_version_company` table,
-since the database is shared with admin/backend. Deleting a company in the
-admin panel deletes its employees (ON DELETE CASCADE).
+The `employees` and `endpoints` tables are owned by this backend: their
+migrations live in `alembic/` and are tracked in a separate
+`alembic_version_company` table, since the database is shared with
+admin/backend. Deleting a company in the admin panel deletes its employees
+and endpoints (ON DELETE CASCADE).
 
 ## Endpoints
 
 - `GET  /api/auth/portal/{login_token}` — company name for a login link
-- `POST /api/auth/login` — `{login_token, username, password}`; username is the company name or an employee username
+- `POST /api/auth/login` — `{login_token, username, password}`; username is the company name
 - `POST /api/auth/change-password` — `{current_password, new_password}` (8+ chars, letters and numbers)
 - `GET  /api/auth/me`
-- `GET  /api/accounts` — the company's employees (`search`, `status`); administrators only
-- `POST /api/accounts` — `{employee_username, employee_email, employee_role, temporary_password?}`;
-  returns the one-time password (random if not given)
+- `GET  /api/accounts` — the company's employees with their computer's live status (`search`, `status`)
+- `POST /api/accounts` — `{employee_username, employee_email}`
 - `GET  /api/accounts/{id}`
-- `POST /api/accounts/{id}/lock|unlock|reset-password`
-- `DELETE /api/accounts/{id}`
+- `POST /api/accounts/{id}/lock|unlock`
+- `DELETE /api/accounts/{id}` — also deletes the employee's Wazuh agent, revoking its key
+- `GET  /api/accounts/{id}/installer` — the employee's one-click endpoint installer (`.cmd`)
+
+## Endpoint installers
+
+Each employee has one computer (`endpoints` table). The first installer
+download pre-registers a Wazuh agent through the manager's API
+(`AG-CUS-<company id>-<username>`, unique across companies; the portal shows
+just the username) and the installer embeds that agent's own key. Running it
+on the computer installs the Wazuh agent, writes the key into `client.keys`
+and starts the service, so the endpoint never uses open self-enrollment.
+The file is a credential: only the signed-in company account can download it.
+
+Wazuh settings (`WAZUH_API_URL/USER/PASSWORD`, `WAZUH_MANAGER_ADDRESS`,
+`WAZUH_AGENT_MSI_URL`) default to the lab setup in `app/core/config.py`.
+The API is only reachable on the server itself; for local development add
+`-L 55000:127.0.0.1:55000` to the SSH tunnel.
+
+The installer first shows a monitoring notice that must be accepted (Y/N),
+then also installs the **screen agent** (`C:\Program Files\AegisGuard\screen-agent.ps1`)
+as a hidden scheduled task that runs in every user's session at logon (a
+Windows service can't capture the desktop). It uploads a JPEG of the screen
+to `POST /api/agent/screen`, authenticated by a per-endpoint token derived
+from the endpoint and its agent id (so it stops working when the endpoint is
+deleted). The server keeps only the latest frame per endpoint, in memory.
+Agents send a frame every 10 s, or every second while someone has the live
+view open (`GET /api/accounts/{id}/screen?live=true`).
+
+Known gap: deleting a company in the admin panel removes its endpoint rows
+(ON DELETE CASCADE) but not their Wazuh agents.
 
 ## Structure
 

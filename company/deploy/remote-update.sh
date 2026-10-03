@@ -15,6 +15,11 @@ sudo -u aegisguard .venv/bin/pip install -q -r requirements.txt
 echo "==> Applying database migrations"
 sudo -u aegisguard .venv/bin/alembic upgrade head
 
+echo "==> Updating Nginx site config"
+cp /opt/aegisguard/AegisGuard/company/deploy/nginx-aegisguard.conf /etc/nginx/sites-available/aegisguard
+nginx -t
+systemctl reload nginx
+
 echo "==> Restarting service"
 systemctl restart aegisguard-company
 sleep 2

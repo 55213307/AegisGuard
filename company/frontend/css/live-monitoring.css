@@ -24,6 +24,13 @@
   color: var(--text-muted);
 }
 
+.endpoint-card-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .endpoint-card-preview svg {
   width: 30px;
   height: 30px;
@@ -55,125 +62,9 @@
   color: var(--text-muted);
 }
 
-/* Endpoint detail modal */
-.detail-title-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.detail-body {
-  display: flex;
-  gap: 20px;
-}
-
-.detail-screen {
-  flex: 1 1 0;
-  min-width: 0;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.detail-screen-preview {
-  height: 300px;
-  border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.detail-screen-preview svg {
-  width: 44px;
-  height: 44px;
-}
-
-.detail-live-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.detail-info {
-  flex: 0 0 340px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.info-list {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.info-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0;
-}
-
-.info-row dt {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.info-row dd {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.detail-activity {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.activity-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.activity-row:first-child {
-  border-top: none;
-}
-
-.activity-time {
-  width: 60px;
-  flex-shrink: 0;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.activity-desc {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
 @media (max-width: 1300px) {
   .endpoint-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .detail-body {
-    flex-direction: column;
-  }
-
-  .detail-info {
-    flex: 1 1 auto;
   }
 }
 

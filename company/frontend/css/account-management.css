@@ -5,12 +5,12 @@
 
 .data-table th:nth-child(1),
 .data-table td:nth-child(1) {
-  width: 140px;
+  width: 180px;
 }
 
 .data-table th:nth-child(2),
 .data-table td:nth-child(2) {
-  width: 220px;
+  width: 260px;
 }
 
 .data-table th:nth-child(3),
@@ -20,12 +20,7 @@
 
 .data-table th:nth-child(4),
 .data-table td:nth-child(4) {
-  width: 110px;
-}
-
-.data-table th:nth-child(5),
-.data-table td:nth-child(5) {
-  width: 130px;
+  width: 150px;
 }
 
 .modal-helper {
@@ -35,49 +30,31 @@
   color: var(--text-secondary);
 }
 
-.cred-list {
+.modal-helper-flush {
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
-.cred-row dt {
-  margin-bottom: 4px;
-  font-size: 12px;
-  letter-spacing: 0.1px;
-  color: var(--text-secondary);
-}
-
-.cred-row dd {
-  margin: 0;
+.installer-box {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
-.cred-row code {
-  flex: 1;
-  min-width: 0;
-  padding: 10px 12px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(91, 155, 255, 0.35);
+  background: rgba(47, 111, 235, 0.12);
+}
+
+.installer-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-primary);
-  font-size: 13px;
-  word-break: break-all;
-  user-select: all;
 }
 
-.btn-sm {
-  padding: 6px 12px;
-  font-size: 13px;
-}
-
-.row-actions .icon-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  filter: none;
+.installer-helper {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }

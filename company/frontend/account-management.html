@@ -66,14 +66,13 @@
             <tr>
               <th>Username</th>
               <th>Email</th>
-              <th>Role</th>
               <th>Status</th>
-              <th>Last Login</th>
+              <th>Last Seen</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="accountsTableBody">
-            <tr><td colspan="6" class="empty-state">Loading accounts&hellip;</td></tr>
+            <tr><td colspan="5" class="empty-state">Loading accounts&hellip;</td></tr>
           </tbody>
         </table>
         </div>
@@ -100,18 +99,7 @@
         <input class="form-input" type="email" id="newEmail" name="email" placeholder="name@corp.com" required />
       </div>
 
-      <div class="form-field">
-        <label class="form-label" for="newRole">Role</label>
-        <select class="form-select" id="newRole" name="role">
-          <option value="Employee">Employee</option>
-          <option value="Administrator">Administrator</option>
-        </select>
-      </div>
-
-      <div class="form-field">
-        <label class="form-label" for="newPassword">Temporary Password</label>
-        <input class="form-input" type="text" id="newPassword" name="password" placeholder="Auto-generate secure password" autocomplete="off" />
-      </div>
+      <p class="modal-helper modal-helper-flush">After the account is created, download the installer and run it on this employee's computer to start monitoring it.</p>
 
       <p class="form-error" id="createAccountError"></p>
 
@@ -125,42 +113,78 @@
     </form>
   </div>
 
-  <div class="modal-scrim" id="credentialsScrim">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="credentialsTitle">
+  <div class="modal-scrim" id="createdScrim">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="createdTitle">
       <div class="modal-header">
-        <h2 class="modal-title font-tech" id="credentialsTitle">Account Created</h2>
+        <h2 class="modal-title font-tech" id="createdTitle">Account Created</h2>
       </div>
-      <p class="modal-helper">Give these to the employee. The password is shown only once and must be changed on first login.</p>
-      <dl class="cred-list">
-        <div class="cred-row"><dt>Login URL</dt><dd><code id="credUrl"></code><button class="btn btn-ghost btn-sm" type="button" data-copy="credUrl">Copy</button></dd></div>
-        <div class="cred-row"><dt>Username</dt><dd><code id="credUsername"></code><button class="btn btn-ghost btn-sm" type="button" data-copy="credUsername">Copy</button></dd></div>
-        <div class="cred-row"><dt>Temporary Password</dt><dd><code id="credPassword"></code><button class="btn btn-ghost btn-sm" type="button" data-copy="credPassword">Copy</button></dd></div>
-      </dl>
+      <p class="modal-helper modal-helper-flush" id="createdHelper"></p>
+      <div class="installer-box">
+        <div>
+          <p class="installer-title">Endpoint Installer</p>
+          <p class="installer-helper">It contains this computer's secret key, so keep it private. You can download it again later from View.</p>
+        </div>
+        <button class="btn btn-primary" type="button" id="createdDownloadBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
+          Download
+        </button>
+      </div>
+      <p class="form-error" id="createdError"></p>
       <div class="modal-actions">
-        <button class="btn btn-ghost" type="button" id="copyAllCredentialsBtn">Copy All</button>
-        <button class="btn btn-primary" type="button" id="closeCredentialsBtn">Done</button>
+        <button class="btn btn-primary" type="button" id="closeCreatedBtn">Done</button>
       </div>
     </div>
   </div>
 
   <div class="modal-scrim" id="detailScrim">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detailUsername">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
       <div class="modal-header">
-        <h2 class="modal-title font-tech" id="detailUsername"></h2>
-        <button class="modal-close" type="button" id="closeDetailBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>
-        </button>
+        <div class="detail-title-row">
+          <h2 class="page-title font-tech" id="detailTitle"></h2>
+          <span class="badge" id="detailStatusBadge"></span>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-ghost" type="button" id="detailRefreshBtn">Force Refresh</button>
+          <button class="btn btn-primary" type="button" id="detailDownloadBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
+            Download Installer
+          </button>
+          <button class="modal-close modal-close-box" type="button" id="closeDetailBtn" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
       </div>
-      <dl class="cred-list" id="detailFields"></dl>
+
       <p class="form-error" id="detailError"></p>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" type="button" id="resetPasswordBtn">Reset Password</button>
+
+      <div class="detail-body">
+        <div class="detail-screen">
+          <div class="detail-screen-preview">
+            <img class="detail-screen-img" id="detailScreenImg" alt="Live screen of this computer" hidden />
+            <svg id="detailScreenPlaceholder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+          </div>
+          <div class="detail-live-indicator">
+            <span class="live-dot" id="detailLiveDot"></span>
+            <span id="detailLiveText"></span>
+          </div>
+        </div>
+        <div class="detail-info panel">
+          <h3 class="panel-title font-tech">Endpoint Information</h3>
+          <dl class="info-list" id="detailInfoList"></dl>
+        </div>
+      </div>
+
+      <div class="panel detail-activity">
+        <h3 class="panel-title font-tech">Recent Activity</h3>
+        <p class="detail-empty">No activity recorded for this endpoint yet.</p>
       </div>
     </div>
   </div>
 
   <script src="js/api.js"></script>
+  <script src="js/format.js"></script>
   <script src="js/sidebar.js"></script>
+  <script src="js/endpoint-detail.js"></script>
   <script src="js/account-management.js"></script>
 </body>
 </html>

@@ -19,7 +19,7 @@ target_metadata = Base.metadata
 # etc. and keeps its history in the default "alembic_version" table. This
 # backend only ever migrates its own tables, tracked in a separate table.
 VERSION_TABLE = "alembic_version_company"
-COMPANY_OWNED_TABLES = {"employees"}
+COMPANY_OWNED_TABLES = {"employees", "endpoints"}
 
 
 def include_object(obj, name, type_, reflected, compare_to):

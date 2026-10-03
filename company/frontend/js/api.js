@@ -4,9 +4,6 @@
 const TOKEN_KEY = "accessToken";
 const USERNAME_KEY = "username";
 const MUST_CHANGE_KEY = "mustChangePassword";
-// UI hint only (hides Account Management from plain employees); the backend
-// enforces the actual permission on every request.
-const CAN_MANAGE_KEY = "canManageAccounts";
 // Which company's login link was used. Kept in localStorage (it's just the
 // login URL, not a secret) so logging out or an expired session returns to
 // that company's own login page instead of a page with no company.
@@ -22,12 +19,7 @@ function getToken() {
 function setSession(token, user, mustChangePassword) {
   sessionStorage.setItem(TOKEN_KEY, token);
   sessionStorage.setItem(USERNAME_KEY, user.display_name);
-  sessionStorage.setItem(CAN_MANAGE_KEY, user.can_manage_accounts ? "1" : "0");
   sessionStorage.setItem(MUST_CHANGE_KEY, mustChangePassword ? "1" : "0");
-}
-
-function canManageAccounts() {
-  return sessionStorage.getItem(CAN_MANAGE_KEY) === "1";
 }
 
 function markPasswordChanged() {
@@ -38,7 +30,6 @@ function clearSession() {
   sessionStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(USERNAME_KEY);
   sessionStorage.removeItem(MUST_CHANGE_KEY);
-  sessionStorage.removeItem(CAN_MANAGE_KEY);
 }
 
 function getLoginToken() {
@@ -122,6 +113,56 @@ async function apiFetch(path, { method = "GET", body, skipAuthRedirect = false }
   }
 
   return data;
+}
+
+// Downloads a file from an authenticated endpoint (a plain <a href> can't
+// send the Bearer token) and saves it under the server-provided filename.
+async function apiDownload(path, fallbackName) {
+  let response;
+  try {
+    response = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } });
+  } catch (networkError) {
+    throw new Error("Could not reach the server. Please check your connection and try again.");
+  }
+  if (response.status === 401) {
+    clearSession();
+    goToLogin();
+    throw new Error("Session expired");
+  }
+  if (!response.ok) {
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      data = null;
+    }
+    throw new Error(extractErrorMessage(data));
+  }
+
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = match ? match[1] : fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Fetches an authenticated image. Returns { blob, headers }, or null when the
+// server has nothing to show yet (404).
+async function apiFetchImage(path) {
+  const response = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` }, cache: "no-store" });
+  if (response.status === 401) {
+    clearSession();
+    goToLogin();
+    throw new Error("Session expired");
+  }
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Image request failed (${response.status})`);
+  return { blob: await response.blob(), headers: response.headers };
 }
 
 // FastAPI returns validation errors (422) as a list of {msg, ...} objects.

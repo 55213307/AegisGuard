@@ -1,19 +1,10 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import Principal, get_current_principal
-from app.core.security import (
-    KIND_COMPANY,
-    KIND_EMPLOYEE,
-    create_access_token,
-    hash_password,
-    verify_password,
-)
+from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.account import Account, AccountStatus
-from app.models.employee import Employee, EmployeeStatus
 from app.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
@@ -28,8 +19,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 INVALID_CREDENTIALS = "Username or password wrong, please try again."
 CONTACT_ADMIN = "Please contact your AegisGuard administrator."
 
-# Checked against when the username doesn't exist, so an unknown user takes
-# as long to reject as a wrong password (no timing hint about valid usernames).
+# Checked against when the account can't be found or has no password yet, so
+# those cases take as long to reject as a wrong password (no timing hint).
 _DUMMY_HASH = hash_password("not-a-real-password-0")
 
 
@@ -43,13 +34,8 @@ def _account_by_token(login_token: str, db: Session) -> Account | None:
 
 
 def _user_out(principal: Principal) -> LoginUser:
-    return LoginUser(
-        username=principal.username,
-        display_name=principal.username,
-        company_name=principal.company_name,
-        role=principal.role,
-        can_manage_accounts=principal.is_administrator,
-    )
+    name = principal.company_name
+    return LoginUser(username=name, display_name=name, company_name=name)
 
 
 @router.get("/portal/{login_token}", response_model=PortalInfo)
@@ -63,55 +49,29 @@ def portal_info(login_token: str, db: Session = Depends(get_db)) -> PortalInfo:
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
-    invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
-
     account = _account_by_token(payload.login_token, db)
-    if account is None:
-        verify_password(payload.password, _DUMMY_HASH)
-        raise invalid
+    username_ok = (
+        account is not None
+        and payload.username.strip().casefold() == account.company.company_name.strip().casefold()
+    )
+    password_hash = account.password_hash if username_ok else None
 
-    # The company name signs in as the company account itself; any other
-    # username is looked up among that company's employees.
-    username = payload.username.strip()
-    employee = None
-    if username.casefold() == account.company.company_name.strip().casefold():
-        password_hash = account.password_hash
-    else:
-        employee = (
-            db.query(Employee)
-            .filter(Employee.unique_id == account.unique_id, Employee.employee_username == username.lower())
-            .first()
-        )
-        password_hash = employee.password_hash if employee else None
-
-    # Wrong link, unknown user, wrong password and "no password issued yet"
+    # Wrong link, wrong username, wrong password and "no password issued yet"
     # all get the same message, so a failed attempt reveals nothing about
     # which part was wrong.
     password_ok = verify_password(payload.password, password_hash or _DUMMY_HASH)
     if password_hash is None or not password_ok:
-        raise invalid
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
 
-    # Status is only revealed once the credentials are proven correct. A
-    # company that isn't Active blocks its employees too.
+    # Status is only revealed once the credentials are proven correct.
     if account.customer_status == AccountStatus.PENDING:
         raise HTTPException(status_code=403, detail=f"This company account has not been activated yet. {CONTACT_ADMIN}")
     if account.customer_status == AccountStatus.LOCKED:
         raise HTTPException(status_code=403, detail=f"This company account is locked. {CONTACT_ADMIN}")
-    if employee is not None and employee.employee_status == EmployeeStatus.LOCKED:
-        raise HTTPException(
-            status_code=403, detail="Your account is locked. Please contact your company administrator."
-        )
 
-    if employee is not None:
-        employee.last_login_time = datetime.now(timezone.utc)
-        db.commit()
-        token = create_access_token(KIND_EMPLOYEE, employee.id)
-    else:
-        token = create_access_token(KIND_COMPANY, account.id)
-
-    principal = Principal(account=account, employee=employee)
+    principal = Principal(account=account)
     return LoginResponse(
-        access_token=token,
+        access_token=create_access_token(account.id),
         must_change_password=principal.must_change_password,
         user=_user_out(principal),
     )

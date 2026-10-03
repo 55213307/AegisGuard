@@ -56,10 +56,10 @@
           <label class="control-select">
             <select id="statusFilter">
               <option value="">All Status</option>
-              <option value="normal">Normal</option>
-              <option value="suspicious">Suspicious</option>
-              <option value="locked">Locked</option>
-              <option value="offline">Offline</option>
+              <option value="Online">Online</option>
+              <option value="Offline">Offline</option>
+              <option value="Connecting">Connecting</option>
+              <option value="Not installed">Not installed</option>
             </select>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
           </label>
@@ -73,30 +73,35 @@
   </div>
 
   <div class="modal-scrim" id="detailScrim">
-    <div class="modal modal-wide" id="detailModal">
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
       <div class="modal-header">
         <div class="detail-title-row">
-          <h2 class="modal-title font-tech" id="detailHostname">WKS-000-000</h2>
-          <span class="badge badge-warning" id="detailStatusBadge">Status</span>
+          <h2 class="page-title font-tech" id="detailTitle"></h2>
+          <span class="badge" id="detailStatusBadge"></span>
         </div>
         <div class="topbar-actions">
-          <button class="btn btn-ghost" type="button" id="forceRefreshBtn">Force Refresh</button>
-          <button class="btn btn-ghost" type="button" id="isolateBtn">Isolate Endpoint</button>
-          <button class="btn btn-primary" type="button" id="lockAccountBtn">Lock Account</button>
-          <button class="modal-close" type="button" id="closeDetailBtn">
+          <button class="btn btn-ghost" type="button" id="detailRefreshBtn">Force Refresh</button>
+          <button class="btn btn-primary" type="button" id="detailDownloadBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
+            Download Installer
+          </button>
+          <button class="modal-close modal-close-box" type="button" id="closeDetailBtn" aria-label="Close">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>
           </button>
         </div>
       </div>
 
+      <p class="form-error" id="detailError"></p>
+
       <div class="detail-body">
         <div class="detail-screen">
           <div class="detail-screen-preview">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
+            <img class="detail-screen-img" id="detailScreenImg" alt="Live screen of this computer" hidden />
+            <svg id="detailScreenPlaceholder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>
           </div>
           <div class="detail-live-indicator">
-            <span class="alert-dot success"></span>
-            <span id="detailLiveMeta">Live &middot; updated 2s ago</span>
+            <span class="live-dot" id="detailLiveDot"></span>
+            <span id="detailLiveText"></span>
           </div>
         </div>
         <div class="detail-info panel">
@@ -107,13 +112,15 @@
 
       <div class="panel detail-activity">
         <h3 class="panel-title font-tech">Recent Activity</h3>
-        <div id="detailActivityList"></div>
+        <p class="detail-empty">No activity recorded for this endpoint yet.</p>
       </div>
     </div>
   </div>
 
   <script src="js/api.js"></script>
+  <script src="js/format.js"></script>
   <script src="js/sidebar.js"></script>
+  <script src="js/endpoint-detail.js"></script>
   <script src="js/live-monitoring.js"></script>
 </body>
 </html>

@@ -104,6 +104,17 @@ deleted). The server keeps only the latest frame per endpoint, in memory.
 Agents send a frame every 10 s, or every second while someone has the live
 view open (`GET /api/accounts/{id}/screen?live=true`).
 
+**Windows Defender and the screen agent.** A script that captures the screen
+and uploads it is flagged by Defender's AMSI scanning and blocked on the
+endpoint. In a lab/demo the endpoint admin allows it with a path exclusion,
+run once on each endpoint **before** the installer:
+`Add-MpPreference -ExclusionPath "C:\Program Files\AegisGuard"`.
+This is a deliberate owner-authorized allow-list, not detection evasion. The
+installer does **not** add the exclusion itself: Defender tamper protection
+blocks exclusion changes from untrusted processes, and self-whitelisting is
+bad practice. In a real deployment this is instead solved by code-signing the
+agent and pushing it via MDM/group policy — manual AV exclusions don't scale.
+
 Known gap: deleting a company in the admin panel removes its endpoint rows
 (ON DELETE CASCADE) but not their Wazuh agents.
 

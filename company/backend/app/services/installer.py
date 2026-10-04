@@ -104,6 +104,10 @@ echo    - view this computer's screen in real time
 echo.
 echo  Monitoring follows your organisation's IT and privacy policy.
 echo  Continue only if the user of this computer has been informed.
+echo.
+echo  NOTE: the live screen view also needs a one-time Windows
+echo  Defender exclusion by an administrator - see the end of this
+echo  window. Security event collection works without it.
 echo ============================================================
 choice /C YN /M "Install AegisGuard monitoring on this computer"
 if errorlevel 2 (
@@ -143,7 +147,25 @@ if %errorlevel% neq 0 goto fail
 
 del "%MSI%" >nul 2>&1
 echo.
-echo Done. This computer is now monitored by AegisGuard.
+echo Done. Security monitoring is active on this computer.
+echo.
+powershell -NoProfile -Command "if ((Get-MpPreference).ExclusionPath -contains '{install_dir}') {{ exit 0 }} else {{ exit 1 }}"
+if %errorlevel% equ 0 (
+    echo Live screen view is active.
+) else (
+    echo ------------------------------------------------------------
+    echo  ACTION REQUIRED - enable the live screen view
+    echo ------------------------------------------------------------
+    echo  Windows Defender is blocking the screen component. An
+    echo  administrator must allow it once. Open PowerShell as
+    echo  administrator and run these two commands:
+    echo.
+    echo     Add-MpPreference -ExclusionPath "{install_dir}"
+    echo     Start-ScheduledTask -TaskName "{task_name}"
+    echo.
+    echo  Security event collection already works without this step.
+    echo ------------------------------------------------------------
+)
 pause
 exit /b 0
 
@@ -175,6 +197,8 @@ def build_installer(company: str, employee: str, key_line: str, screen_token: st
         manager=settings.wazuh_manager_address,
         msi_url=settings.wazuh_agent_msi_url,
         key_line=key_line,
+        install_dir=INSTALL_DIR,
+        task_name=TASK_NAME,
         # Base64 keeps the multi-line scripts out of cmd.exe's quoting rules.
         screen_agent_b64=base64.b64encode(screen_agent.encode("utf-8")).decode("ascii"),
         setup_encoded=base64.b64encode(setup.encode("utf-16-le")).decode("ascii"),

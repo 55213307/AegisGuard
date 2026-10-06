@@ -16,7 +16,7 @@ target_metadata = Base.metadata
 
 # Tables owned and migrated by company/backend (same database, separate
 # "alembic_version_company" history). Autogenerate must not try to drop them.
-COMPANY_OWNED_TABLES = {"employees", "endpoints", "alembic_version_company"}
+COMPANY_OWNED_TABLES = {"employees", "endpoints", "security_events", "alembic_version_company"}
 
 
 def include_object(obj, name, type_, reflected, compare_to):

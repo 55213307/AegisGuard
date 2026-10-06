@@ -17,7 +17,7 @@ function timeAgo(isoOrDate) {
   if (hours < 24) return `${hours} hr ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
-  return new Date(isoOrDate).toLocaleDateString();
+  return new Date(isoOrDate).toLocaleDateString("en-US");
 }
 
 // endpoint_status values from the API -> badge class and live-dot state.

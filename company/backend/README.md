@@ -118,6 +118,26 @@ agent and pushing it via MDM/group policy — manual AV exclusions don't scale.
 Known gap: deleting a company in the admin panel removes its endpoint rows
 (ON DELETE CASCADE) but not their Wazuh agents.
 
+## Security event ingestion
+
+A background thread (`app/services/ingest.py`, started with the app) tails the
+Wazuh manager's `alerts.json` and stores new alerts in the `security_events`
+table. It only keeps alerts from portal-registered endpoints (matched by Wazuh
+agent id → `endpoints`), skips the manager's own alerts (agent 000), and
+dedups on `wazuh_alert_id` so re-reading never doubles rows. It handles the
+daily log rotation (resets when the file is rotated/truncated) and partial
+lines written mid-flush. Wazuh rule level maps to severity: 0-6 Info, 7-11
+Warning, 12-15 Critical. The raw alert detail (`data.win`, groups, full_log)
+is kept in a JSONB `details` column; `app/services/alerts.py` does the parsing
+(pure functions).
+
+The service user must be able to read `/var/ossec/logs/alerts/alerts.json`
+(owner `wazuh:wazuh`, mode 640) — the deploy script adds `aegisguard` to the
+`wazuh` group. Settings in `app/core/config.py`: `INGEST_ENABLED`,
+`ALERTS_FILE_PATH`, `INGEST_POLL_SECONDS`. On Windows/local dev the file is
+absent, so the ingester just idles (set `ALERTS_FILE_PATH` to a local file to
+exercise it).
+
 ## Structure
 
 ```

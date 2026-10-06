@@ -48,3 +48,19 @@ class EmployeeOut(BaseModel):
 class EmployeeListResponse(BaseModel):
     total: int
     items: list[EmployeeOut]
+
+
+class SecurityEventOut(BaseModel):
+    id: int
+    event_time: datetime
+    severity: str
+    event_type: str | None
+    rule_description: str | None
+    event_user: str | None
+    windows_event_id: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class SecurityEventListResponse(BaseModel):
+    items: list[SecurityEventOut]

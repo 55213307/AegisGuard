@@ -9,7 +9,13 @@ from app.api.deps import Principal, require_password_changed
 from app.db.session import get_db
 from app.models.employee import Employee, EmployeeStatus
 from app.models.endpoint import Endpoint
-from app.schemas.employee import EmployeeCreate, EmployeeListResponse, EmployeeOut
+from app.models.security_event import SecurityEvent
+from app.schemas.employee import (
+    EmployeeCreate,
+    EmployeeListResponse,
+    EmployeeOut,
+    SecurityEventListResponse,
+)
 from app.services import screens, wazuh
 from app.services.installer import build_installer
 
@@ -247,6 +253,27 @@ def latest_screen(
         media_type="image/jpeg",
         headers={"Cache-Control": "no-store", "X-Frame-Age": f"{age_seconds:.1f}"},
     )
+
+
+@router.get("/{employee_id}/events", response_model=SecurityEventListResponse)
+def list_events(
+    employee_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    principal: Principal = Depends(require_password_changed),
+    db: Session = Depends(get_db),
+) -> SecurityEventListResponse:
+    """Recent security events for this employee's computer, newest first."""
+    employee = _get_employee_or_404(employee_id, principal, db)
+    if employee.endpoint is None:
+        return SecurityEventListResponse(items=[])
+    events = (
+        db.query(SecurityEvent)
+        .filter(SecurityEvent.endpoint_id == employee.endpoint.id)
+        .order_by(SecurityEvent.event_time.desc())
+        .limit(limit)
+        .all()
+    )
+    return SecurityEventListResponse(items=events)
 
 
 @router.delete("/{employee_id}", status_code=204)

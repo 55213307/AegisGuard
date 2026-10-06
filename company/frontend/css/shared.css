@@ -687,9 +687,25 @@ svg {
   color: var(--text-muted);
 }
 
+.activity-row .badge {
+  flex-shrink: 0;
+  min-width: 140px;
+  justify-content: flex-start;
+}
+
 .activity-desc {
   font-size: 13px;
   color: var(--text-secondary);
+  min-width: 0;
+}
+
+.detail-activity .activity-row:first-of-type {
+  border-top: none;
+}
+
+.detail-activity {
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .modal-close-box {

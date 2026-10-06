@@ -15,6 +15,14 @@ sudo -u aegisguard .venv/bin/pip install -q -r requirements.txt
 echo "==> Applying database migrations"
 sudo -u aegisguard .venv/bin/alembic upgrade head
 
+echo "==> Granting the service read access to Wazuh alerts (if Wazuh is installed)"
+# The alert ingester reads /var/ossec/logs/alerts/alerts.json (wazuh:wazuh,
+# mode 640). Being in the wazuh group lets the aegisguard service read it;
+# the restart below picks up the new group membership.
+if getent group wazuh >/dev/null 2>&1; then
+  usermod -a -G wazuh aegisguard
+fi
+
 echo "==> Updating Nginx site config"
 cp /opt/aegisguard/AegisGuard/company/deploy/nginx-aegisguard.conf /etc/nginx/sites-available/aegisguard
 nginx -t

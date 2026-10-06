@@ -5,8 +5,8 @@
     url("../../../resources/welcomeBackground.png");
   background-size: cover;
   background-position: center;
-  padding: 32px;
-  min-height: 150px;
+  padding: 20px 24px;
+  min-height: 96px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -41,10 +41,10 @@
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg-surface);
-  padding: 20px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .stat-icon {
@@ -69,7 +69,7 @@
   margin: 0;
   font-family: "Chakra Petch", sans-serif;
   font-weight: 700;
-  font-size: 30px;
+  font-size: 26px;
   color: var(--text-primary);
 }
 
@@ -122,7 +122,7 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg-surface-alt);
-  padding: 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -166,8 +166,8 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  max-height: 320px;
+  gap: 10px;
+  max-height: 148px;
   overflow-y: auto;
 }
 
@@ -234,5 +234,123 @@
 
   .service-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Dashboard charts */
+.chart-body {
+  flex: 1;
+  min-height: 140px;
+  display: flex;
+  align-items: stretch;
+}
+
+.chart-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.chart-bar {
+  fill: var(--brand-blue);
+  transition: y 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.6s cubic-bezier(0.4, 0, 0.2, 1), fill 0.15s ease;
+}
+
+.chart-bar:hover {
+  fill: var(--brand-blue-light);
+}
+
+.chart-value {
+  fill: var(--text-primary);
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 12px;
+}
+
+.chart-axis {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
+.donut-body {
+  flex: 1;
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.donut-svg {
+  width: 116px;
+  height: 116px;
+  flex-shrink: 0;
+}
+
+.donut-total {
+  fill: var(--text-primary);
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 22px;
+}
+
+.donut-sub {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
+.donut-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 120px;
+}
+
+.donut-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-count {
+  margin-left: auto;
+  font-family: "Chakra Petch", sans-serif;
+  color: var(--text-primary);
+}
+
+.dashboard-main {
+  gap: 16px;
+  min-height: calc(100vh - 32px);
+}
+
+/* The chart row grows to fill the leftover height; its two panels get taller. */
+.panels-row-grow {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+
+.panels-row-grow .panel {
+  min-height: 0;
+}
+
+.donut-svg circle {
+  transition: stroke-dasharray 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-bar,
+  .donut-svg circle {
+    transition: none;
   }
 }

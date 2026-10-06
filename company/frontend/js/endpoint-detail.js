@@ -16,6 +16,9 @@ const EndpointDetail = (() => {
   const placeholder = document.getElementById("detailScreenPlaceholder");
   const liveDot = document.getElementById("detailLiveDot");
   const liveText = document.getElementById("detailLiveText");
+  const activityEl = document.getElementById("detailActivity");
+
+  const SEVERITY_BADGE = { Critical: "badge-danger", Warning: "badge-warning", Info: "badge-success" };
 
   let account = null;
   let onChanged = () => {};
@@ -114,6 +117,43 @@ const EndpointDetail = (() => {
     renderLiveLine();
   }
 
+  function formatEventTime(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "";
+    const sameDay = date.toDateString() === new Date().toDateString();
+    const time = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+    return sameDay ? time : `${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${time}`;
+  }
+
+  async function loadActivity(forAccount) {
+    activityEl.innerHTML = `<p class="detail-empty">Loading recent activity…</p>`;
+    try {
+      const data = await apiFetch(`/api/accounts/${forAccount.id}/events?limit=15`);
+      if (account !== forAccount) return; // dialog switched/closed meanwhile
+      if (!data.items.length) {
+        activityEl.innerHTML = `<p class="detail-empty">No activity recorded for this endpoint yet.</p>`;
+        return;
+      }
+      activityEl.innerHTML = data.items
+        .map((e) => {
+          const label = e.event_type || e.severity;
+          const badge = SEVERITY_BADGE[e.severity] || "badge-success";
+          const desc = e.rule_description || "";
+          const user = e.event_user ? ` · ${escapeHtml(e.event_user)}` : "";
+          return `
+            <div class="activity-row">
+              <span class="activity-time">${escapeHtml(formatEventTime(e.event_time))}</span>
+              <span class="badge ${badge}">${escapeHtml(label)}</span>
+              <span class="activity-desc">${escapeHtml(desc)}${user}</span>
+            </div>`;
+        })
+        .join("");
+    } catch (err) {
+      if (account !== forAccount) return;
+      activityEl.innerHTML = `<p class="detail-empty">Could not load recent activity.</p>`;
+    }
+  }
+
   function open(nextAccount, options = {}) {
     close();
     onChanged = options.onChanged || (() => {});
@@ -121,6 +161,7 @@ const EndpointDetail = (() => {
     render(nextAccount);
     scrim.classList.add("open");
     pollScreen();
+    loadActivity(nextAccount);
   }
 
   function close() {

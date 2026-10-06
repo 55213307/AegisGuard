@@ -30,5 +30,12 @@ class Settings(BaseSettings):
     # admin PC's hosts-file name), used by the screen agent to upload frames.
     portal_public_url: str = "http://192.168.241.87"
 
+    # Wazuh alert ingestion. The manager writes alerts here (owner wazuh:wazuh,
+    # mode 640) — the service user must be in the wazuh group to read it. The
+    # ingester idles when the file doesn't exist (e.g. local dev on Windows).
+    ingest_enabled: bool = True
+    alerts_file_path: str = "/var/ossec/logs/alerts/alerts.json"
+    ingest_poll_seconds: float = 5.0
+
 
 settings = Settings()

@@ -123,15 +123,25 @@ set "AG_SCREEN_AGENT={screen_agent_b64}"
 set "MSI=%TEMP%\aegisguard-wazuh-agent.msi"
 set "AGENT_DIR=%ProgramFiles(x86)%\ossec-agent"
 
+rem Already enrolled on this computer? Skip the download/install (no internet
+rem needed) and just re-key it to this endpoint.
+sc query WazuhSvc >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [1/5] Monitoring agent already installed - skipping download.
+    echo [2/5] Skipping install.
+    goto configure
+)
+
 echo [1/5] Downloading the monitoring agent...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri $env:MSI_URL -OutFile $env:MSI"
-if %errorlevel% neq 0 goto fail
+if %errorlevel% neq 0 goto faildownload
 
 echo [2/5] Installing...
 start "" /wait msiexec /i "%MSI%" /q WAZUH_MANAGER=%MANAGER%
 rem 1638 = this version is already installed; the key below still updates it.
 if %errorlevel% neq 0 if %errorlevel% neq 1638 goto fail
 
+:configure
 echo [3/5] Registering this computer with AegisGuard...
 net stop WazuhSvc >nul 2>&1
 powershell -NoProfile -Command "[IO.File]::WriteAllText($env:AGENT_DIR + '\client.keys', $env:AGENT_KEY_LINE + [char]10)"
@@ -168,6 +178,14 @@ if %errorlevel% equ 0 (
 )
 pause
 exit /b 0
+
+:faildownload
+echo.
+echo Could not download the monitoring agent. This computer needs
+echo internet access to install it for the first time. Check the
+echo network connection and run this installer again.
+pause
+exit /b 1
 
 :fail
 echo.

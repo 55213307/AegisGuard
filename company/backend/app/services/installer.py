@@ -127,31 +127,40 @@ rem Already enrolled on this computer? Skip the download/install (no internet
 rem needed) and just re-key it to this endpoint.
 sc query WazuhSvc >nul 2>&1
 if %errorlevel% equ 0 (
-    echo [1/5] Monitoring agent already installed - skipping download.
-    echo [2/5] Skipping install.
+    echo [1/6] Monitoring agent already installed - skipping download.
+    echo [2/6] Skipping install.
     goto configure
 )
 
-echo [1/5] Downloading the monitoring agent...
+echo [1/6] Downloading the monitoring agent...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri $env:MSI_URL -OutFile $env:MSI"
 if %errorlevel% neq 0 goto faildownload
 
-echo [2/5] Installing...
+echo [2/6] Installing...
 start "" /wait msiexec /i "%MSI%" /q WAZUH_MANAGER=%MANAGER%
 rem 1638 = this version is already installed; the key below still updates it.
 if %errorlevel% neq 0 if %errorlevel% neq 1638 goto fail
 
 :configure
-echo [3/5] Registering this computer with AegisGuard...
+echo [3/6] Registering this computer with AegisGuard...
 net stop WazuhSvc >nul 2>&1
 powershell -NoProfile -Command "[IO.File]::WriteAllText($env:AGENT_DIR + '\client.keys', $env:AGENT_KEY_LINE + [char]10)"
 if %errorlevel% neq 0 goto fail
 
-echo [4/5] Starting monitoring...
+echo [4/6] Starting monitoring...
 net start WazuhSvc
 if %errorlevel% neq 0 goto fail
 
-echo [5/5] Setting up the live screen view...
+echo [5/6] Enabling process auditing for behavior monitoring...
+rem Windows Event 4688 (process creation) feeds the behavioral anomaly model
+rem so it learns which programs each computer normally runs. Use the
+rem subcategory GUID, not its English name, so this works on non-English
+rem (e.g. Chinese) Windows too. Best-effort: never fail the install over it.
+auditpol /set /subcategory:"{{0CCE922B-69AE-11D9-BED3-505054503030}}" /success:enable /failure:enable >nul 2>&1
+rem Include the command line in 4688 events (e.g. "powershell -enc ...").
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f >nul 2>&1
+
+echo [6/6] Setting up the live screen view...
 powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {setup_encoded}
 if %errorlevel% neq 0 goto fail
 

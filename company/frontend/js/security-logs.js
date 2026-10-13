@@ -32,12 +32,12 @@ function populateEventTypeOptions() {
     types.map((type) => `<option value="${type}">${type}</option>`).join("");
 }
 
-function renderLogsTable() {
+function getFilteredLogs() {
   const query = searchInput.value.trim().toLowerCase();
   const severity = severityFilter.value;
   const eventType = eventTypeFilter.value;
 
-  const filtered = allLogs.filter((log) => {
+  return allLogs.filter((log) => {
     const matchesQuery =
       !query ||
       log.endpoint_name.toLowerCase().includes(query) ||
@@ -47,6 +47,10 @@ function renderLogsTable() {
     const matchesEventType = !eventType || log.event_type === eventType;
     return matchesQuery && matchesSeverity && matchesEventType;
   });
+}
+
+function renderLogsTable() {
+  const filtered = getFilteredLogs();
 
   if (filtered.length === 0) {
     tableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No log entries match your filters.</td></tr>`;
@@ -87,8 +91,42 @@ severityFilter.addEventListener("change", renderLogsTable);
 eventTypeFilter.addEventListener("change", renderLogsTable);
 dateRangeFilter.addEventListener("change", loadLogs);
 
+function csvCell(value) {
+  const text = value == null ? "" : String(value);
+  // Quote if the cell contains a comma, quote or newline; double embedded quotes.
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// Exports exactly what the filters currently show — so narrowing Severity to
+// Critical/Warning exports only the problematic entries, not the full log.
 exportLogsBtn.addEventListener("click", () => {
-  window.open(`/api/security-logs/export?days=${dateRangeFilter.value}`, "_blank");
+  const rows = getFilteredLogs();
+  if (rows.length === 0) return;
+
+  const header = ["Timestamp", "Endpoint", "User", "Event Type", "Severity", "Description"];
+  const lines = [header.map(csvCell).join(",")];
+  for (const log of rows) {
+    lines.push([
+      formatTimestamp(log.timestamp),
+      log.endpoint_name,
+      log.user || "",
+      log.event_type || "",
+      SEVERITY_LABEL[log.severity] || log.severity,
+      log.description || "",
+    ].map(csvCell).join(","));
+  }
+
+  // BOM so Excel reads UTF-8 correctly.
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "").replace(/(\d{8})(\d{4})/, "$1-$2");
+  link.href = url;
+  link.download = `aegisguard-security-logs-${stamp}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 });
 
 loadLogs();

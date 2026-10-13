@@ -72,6 +72,12 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName '__TASK_NAME__' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+# On a re-install the already-running agent keeps its OLD upload token in
+# memory, and MultipleInstances IgnoreNew makes Start a no-op, so it would
+# keep sending the stale token (401). Stop the task and kill any lingering
+# agent process first, so the fresh instance below reads the new token.
+Stop-ScheduledTask -TaskName '__TASK_NAME__' -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*__AGENT_PATH__*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-ScheduledTask -TaskName '__TASK_NAME__'
 """
 

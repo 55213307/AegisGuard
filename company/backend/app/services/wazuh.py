@@ -72,10 +72,39 @@ def get_agents_info(agent_ids: list[str]) -> dict[str, dict]:
     return {item["id"]: item for item in body["data"]["affected_items"]}
 
 
+# Wazuh per-item error code for "Agent does not exist".
+_AGENT_NOT_FOUND = 1701
+
+
 def delete_agent(agent_id: str) -> None:
-    """Removes the agent, so its key stops working immediately."""
-    _request(
-        "DELETE",
-        "/agents",
-        params={"agents_list": agent_id, "status": "all", "older_than": "0s"},
-    )
+    """Removes the agent so its key stops working immediately.
+
+    Idempotent: if the agent is already gone from the manager, that's the
+    desired end state, so it counts as success rather than an error. Only a
+    genuinely unreachable manager (or an unexpected failure) raises, so that
+    deleting an endpoint is never blocked just because its agent was already
+    removed. DELETE /agents reports per-item outcomes and sets the top-level
+    "error" flag even for the already-gone case, so we inspect the items
+    instead of trusting that flag (unlike _request)."""
+    try:
+        with _client() as client:
+            headers = {"Authorization": f"Bearer {_token(client)}"}
+            response = client.request(
+                "DELETE",
+                "/agents",
+                headers=headers,
+                params={"agents_list": agent_id, "status": "all", "older_than": "0s"},
+            )
+    except httpx.HTTPError as exc:
+        raise WazuhError(f"Wazuh API unreachable: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise WazuhError(f"Wazuh API DELETE /agents failed: {response.status_code} {response.text}")
+
+    data = (response.json() if response.content else {}).get("data", {})
+    if data.get("total_affected_items", 0) >= 1:
+        return  # actually deleted
+    for item in data.get("failed_items", []):
+        if (item.get("error") or {}).get("code") == _AGENT_NOT_FOUND:
+            return  # already gone — that's fine
+    raise WazuhError(f"Wazuh API did not delete agent {agent_id}: {data}")

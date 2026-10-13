@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import datetime
 
@@ -22,6 +23,8 @@ from app.services.installer import build_installer
 # Served as "accounts" because that's what the portal's Account Management
 # page calls them: the employees whose computers the company monitors.
 router = APIRouter(prefix="/api/accounts", tags=["employee accounts"])
+
+logger = logging.getLogger(__name__)
 
 ENDPOINT_SERVICE_DOWN = "The endpoint monitoring service is unavailable. Please try again later."
 
@@ -287,6 +290,14 @@ def delete_employee(
         try:
             wazuh.delete_agent(employee.endpoint.wazuh_agent_id)
         except wazuh.WazuhError as exc:
+            # The 503 below is a handled response, so the underlying Wazuh
+            # reason never reaches the logs on its own — record it here.
+            logger.warning(
+                "delete_agent failed for endpoint %s (agent %s): %s",
+                employee.endpoint.id,
+                employee.endpoint.wazuh_agent_id,
+                exc,
+            )
             raise HTTPException(status_code=503, detail=ENDPOINT_SERVICE_DOWN) from exc
         screens.forget(employee.endpoint.id)
     db.delete(employee)

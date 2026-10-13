@@ -35,4 +35,12 @@ class Employee(Base):
     created_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     company: Mapped["Customer"] = relationship()  # noqa: F821
-    endpoint: Mapped["Endpoint | None"] = relationship(back_populates="employee", uselist=False)  # noqa: F821
+    # cascade + passive_deletes so deleting an employee deletes its endpoint
+    # (and, via the DB's ON DELETE CASCADE, that endpoint's security_events)
+    # instead of trying to null the endpoint's NOT NULL employee_id FK.
+    endpoint: Mapped["Endpoint | None"] = relationship(  # noqa: F821
+        back_populates="employee",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

@@ -9,6 +9,7 @@ class DashboardStats(BaseModel):
     offline: int
     events_24h: int
     critical_24h: int
+    anomalies_24h: int
     platform_status: str
 
 
@@ -28,6 +29,8 @@ class RecentAlert(BaseModel):
     severity: str
     event_type: str | None
     rule_description: str | None
+    risk_score: int | None = None
+    risk_reason: str | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -36,3 +39,4 @@ class DashboardResponse(BaseModel):
     timeline_7d: list[TimelinePoint]
     services: dict[str, ServiceStatus]
     recent_alerts: list[RecentAlert]
+    anomalies: list[RecentAlert]  # latest behavioral anomalies (risk at/above the alert threshold)

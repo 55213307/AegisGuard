@@ -1,9 +1,9 @@
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import Principal, require_password_changed
@@ -17,7 +17,8 @@ from app.schemas.employee import (
     EmployeeOut,
     SecurityEventListResponse,
 )
-from app.services import screens, wazuh
+from app.services import endpoint_lock, screens, wazuh
+from app.services.ml.model import ANOMALY_RISK_THRESHOLD, EXPLAIN_RISK_FROM
 from app.services.installer import build_installer
 
 # Served as "accounts" because that's what the portal's Account Management
@@ -71,7 +72,36 @@ def _parse_time(value: str | None) -> datetime | None:
     return None if parsed.year >= 9999 else parsed
 
 
-def _to_out(employee: Employee, agents_info: dict[str, dict] | None) -> EmployeeOut:
+# How long an anomaly keeps its computer marked as "active" on Live Monitoring.
+ANOMALY_ACTIVE_MINUTES = 15
+
+
+def _risk_24h(db: Session, employees: list[Employee]) -> dict[int, tuple[int | None, int | None]]:
+    """Per endpoint id: (highest risk score in the last 24 hours, highest in the
+    last ANOMALY_ACTIVE_MINUTES minutes)."""
+    endpoint_ids = [e.endpoint.id for e in employees if e.endpoint is not None]
+    if not endpoint_ids:
+        return {}
+    now = datetime.now(timezone.utc)
+    recent_since = now - timedelta(minutes=ANOMALY_ACTIVE_MINUTES)
+    rows = (
+        db.query(
+            SecurityEvent.endpoint_id,
+            func.max(SecurityEvent.risk_score),
+            func.max(case((SecurityEvent.event_time >= recent_since, SecurityEvent.risk_score), else_=None)),
+        )
+        .filter(SecurityEvent.endpoint_id.in_(endpoint_ids), SecurityEvent.event_time >= now - timedelta(hours=24))
+        .group_by(SecurityEvent.endpoint_id)
+        .all()
+    )
+    return {endpoint_id: (day, recent) for endpoint_id, day, recent in rows}
+
+
+def _to_out(
+    employee: Employee,
+    agents_info: dict[str, dict] | None,
+    risk_by_endpoint: dict[int, tuple[int | None, int | None]] | None = None,
+) -> EmployeeOut:
     endpoint = employee.endpoint
     info: dict = {}
     if endpoint is None:
@@ -85,6 +115,7 @@ def _to_out(employee: Employee, agents_info: dict[str, dict] | None) -> Employee
     os_info = info.get("os") or {}
     os_name = " ".join(part for part in (os_info.get("name"), os_info.get("version")) if part) or None
     ip_address = info.get("ip")
+    day_risk, recent_risk = (risk_by_endpoint or {}).get(endpoint.id, (None, None)) if endpoint else (None, None)
     return EmployeeOut(
         id=employee.id,
         employee_username=employee.employee_username,
@@ -97,6 +128,10 @@ def _to_out(employee: Employee, agents_info: dict[str, dict] | None) -> Employee
         os_name=os_name,
         agent_version=info.get("version"),
         last_seen_time=_parse_time(info.get("lastKeepAlive")),
+        lock_reason=employee.lock_reason,
+        locked_at=employee.locked_at,
+        risk_24h=day_risk,
+        risk_active=recent_risk if recent_risk is not None and recent_risk >= ANOMALY_RISK_THRESHOLD else None,
     )
 
 
@@ -119,7 +154,8 @@ def list_employees(
         query = query.filter(Employee.employee_status == status_filter)
     employees = query.order_by(Employee.employee_username.asc()).all()
     agents_info = _agents_info(employees)
-    return EmployeeListResponse(total=len(employees), items=[_to_out(e, agents_info) for e in employees])
+    risk = _risk_24h(db, employees)
+    return EmployeeListResponse(total=len(employees), items=[_to_out(e, agents_info, risk) for e in employees])
 
 
 @router.post("", response_model=EmployeeOut, status_code=201)
@@ -153,7 +189,7 @@ def get_employee(
     employee_id: int, principal: Principal = Depends(require_password_changed), db: Session = Depends(get_db)
 ) -> EmployeeOut:
     employee = _get_employee_or_404(employee_id, principal, db)
-    return _to_out(employee, _agents_info([employee]))
+    return _to_out(employee, _agents_info([employee]), _risk_24h(db, [employee]))
 
 
 @router.post("/{employee_id}/lock", response_model=EmployeeOut)
@@ -161,8 +197,7 @@ def lock_employee(
     employee_id: int, principal: Principal = Depends(require_password_changed), db: Session = Depends(get_db)
 ) -> EmployeeOut:
     employee = _get_employee_or_404(employee_id, principal, db)
-    employee.employee_status = EmployeeStatus.LOCKED
-    db.commit()
+    endpoint_lock.lock(db, employee, "Locked by administrator", principal.company_name)
     return _to_out(employee, _agents_info([employee]))
 
 
@@ -171,8 +206,7 @@ def unlock_employee(
     employee_id: int, principal: Principal = Depends(require_password_changed), db: Session = Depends(get_db)
 ) -> EmployeeOut:
     employee = _get_employee_or_404(employee_id, principal, db)
-    employee.employee_status = EmployeeStatus.ACTIVE
-    db.commit()
+    endpoint_lock.unlock(db, employee, principal.company_name)
     return _to_out(employee, _agents_info([employee]))
 
 
@@ -265,13 +299,25 @@ def list_events(
     principal: Principal = Depends(require_password_changed),
     db: Session = Depends(get_db),
 ) -> SecurityEventListResponse:
-    """Recent security events for this employee's computer, newest first."""
+    """Recent problems on this employee's computer, newest first: events the
+    behavioral model rates elevated or worse, and Warning/Critical events.
+    Routine activity (process creations, logons) is left out, and so are the
+    CIS benchmark results, which each configuration scan reports in bulk."""
     employee = _get_employee_or_404(employee_id, principal, db)
     if employee.endpoint is None:
         return SecurityEventListResponse(items=[])
     events = (
         db.query(SecurityEvent)
-        .filter(SecurityEvent.endpoint_id == employee.endpoint.id)
+        .filter(
+            SecurityEvent.endpoint_id == employee.endpoint.id,
+            or_(
+                SecurityEvent.risk_score >= EXPLAIN_RISK_FROM,
+                and_(
+                    SecurityEvent.severity.in_(("Warning", "Critical")),
+                    or_(SecurityEvent.event_type.is_(None), SecurityEvent.event_type != "Security Configuration"),
+                ),
+            ),
+        )
         .order_by(SecurityEvent.event_time.desc())
         .limit(limit)
         .all()

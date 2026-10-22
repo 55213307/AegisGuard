@@ -16,6 +16,7 @@ from app.schemas.dashboard import (
     TimelinePoint,
 )
 from app.services import wazuh
+from app.services.ml.model import ANOMALY_RISK_THRESHOLD
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -38,6 +39,9 @@ def dashboard(
     critical_24h = events.filter(
         SecurityEvent.event_time >= day_ago, SecurityEvent.severity == "Critical"
     ).count()
+
+    anomaly_events = events.filter(SecurityEvent.risk_score >= ANOMALY_RISK_THRESHOLD)
+    anomalies_24h = anomaly_events.filter(SecurityEvent.event_time >= day_ago).count()
 
     # Online/offline from Wazuh. If the manager is unreachable, we still render
     # the rest of the dashboard and flag the service below.
@@ -86,15 +90,24 @@ def dashboard(
         .limit(8)
         .all()
     )
-    recent_alerts = [
-        RecentAlert(
+    def to_alert(e: SecurityEvent) -> RecentAlert:
+        return RecentAlert(
             event_time=e.event_time,
             endpoint_name=endpoint_names.get(e.endpoint_id, "—"),
             severity=e.severity,
             event_type=e.event_type,
             rule_description=e.rule_description,
+            risk_score=e.risk_score,
+            risk_reason=e.risk_reason,
         )
-        for e in recent
+
+    recent_alerts = [to_alert(e) for e in recent]
+    anomalies = [
+        to_alert(e)
+        for e in anomaly_events.filter(SecurityEvent.event_time >= week_ago)
+        .order_by(SecurityEvent.event_time.desc())
+        .limit(6)
+        .all()
     ]
 
     last_event_time = recent[0].event_time if recent else None
@@ -120,10 +133,12 @@ def dashboard(
             offline=offline,
             events_24h=events_24h,
             critical_24h=critical_24h,
+            anomalies_24h=anomalies_24h,
             platform_status="Operational" if wazuh_ok else "Degraded",
         ),
         severity_7d=severity_7d,
         timeline_7d=timeline,
         services=services,
         recent_alerts=recent_alerts,
+        anomalies=anomalies,
     )

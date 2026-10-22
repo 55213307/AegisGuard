@@ -1,19 +1,33 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import agent, auth, dashboard, employees, security_logs
+from app.api.routes import agent, anomalies, auth, dashboard, employees, security_logs
 from app.core.config import settings
 from app.services import ingest
+from app.services.ml import registry as ml_registry
+
+# uvicorn only sets up logging for its own loggers, so without this the
+# background workers' INFO lines (ingestion, model training) never reach the
+# journal; only warnings and errors would.
+_app_log = logging.getLogger("aegisguard")
+if not _app_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s - %(message)s"))
+    _app_log.addHandler(_handler)
+_app_log.setLevel(logging.INFO)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ingest.start()
+    ml_registry.start()
     try:
         yield
     finally:
+        ml_registry.stop()
         ingest.stop()
 
 
@@ -36,6 +50,7 @@ app.include_router(employees.router)
 app.include_router(agent.router)
 app.include_router(dashboard.router)
 app.include_router(security_logs.router)
+app.include_router(anomalies.router)
 
 # Frontend lives at AegisGuard/company/frontend and references shared assets
 # at AegisGuard/resources via "../../resources".

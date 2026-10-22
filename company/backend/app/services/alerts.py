@@ -34,15 +34,37 @@ _GROUP_LABELS: list[tuple[str, str]] = [
     ("process", "Process"),
 ]
 
-_GENERIC_GROUPS = {"windows", "wazuh", "pci_dss", "gdpr", "hipaa", "nist_800_53", "tsc", "gpg13"}
+# "wef" is the group Wazuh's Windows Event Forwarding rules (67xxx) put on
+# logons, logoffs and process creation; it says nothing about the event.
+_GENERIC_GROUPS = {"windows", "wazuh", "pci_dss", "gdpr", "hipaa", "nist_800_53", "tsc", "gpg13", "wef"}
+
+# For Windows Security events whose rule groups don't say what happened (the
+# WEF rules above), the event ID does.
+_WINDOWS_EVENT_LABELS: dict[str, str] = {
+    "4624": "Login Success",
+    "4625": "Login Failed",
+    "4634": "Logoff",
+    "4647": "Logoff",
+    "4672": "Special Privileges",
+    "4688": "Process",
+    "4720": "Account Created",
+    "4726": "Account Deleted",
+    "4738": "Account Changed",
+    "4740": "Account Locked",
+    "1102": "Audit Log Cleared",
+}
 
 
-def _event_type(groups: list[str], decoder: str | None) -> str | None:
+def _event_type(groups: list[str], decoder: str | None, windows_event_id: str | None = None) -> str | None:
+    # Wazuh group names sometimes carry stray whitespace (e.g. " WEF").
+    groups = [g.strip() for g in groups]
     for keyword, label in _GROUP_LABELS:
         if any(keyword in g for g in groups):
             return label
+    if windows_event_id in _WINDOWS_EVENT_LABELS:
+        return _WINDOWS_EVENT_LABELS[windows_event_id]
     for g in reversed(groups):  # last group is usually the most specific
-        if g not in _GENERIC_GROUPS:
+        if g and g.lower() not in _GENERIC_GROUPS:
             return g.replace("_", " ").title()
     if decoder:
         return decoder.replace("_", " ").title()
@@ -94,6 +116,7 @@ def parse_alert(alert: dict[str, Any]) -> dict[str, Any] | None:
     groups = rule.get("groups") or []
     data = alert.get("data") or {}
     win_system = (data.get("win") or {}).get("system") or {}
+    windows_event_id = str(win_system.get("eventID"))[:20] if win_system.get("eventID") else None
 
     return {
         "wazuh_alert_id": str(alert_id)[:64],
@@ -102,9 +125,9 @@ def parse_alert(alert: dict[str, Any]) -> dict[str, Any] | None:
         "rule_level": level,
         "rule_description": (rule.get("description") or "")[:500] or None,
         "severity": severity_for_level(level),
-        "event_type": _event_type(groups, (alert.get("decoder") or {}).get("name")),
+        "event_type": _event_type(groups, (alert.get("decoder") or {}).get("name"), windows_event_id),
         "event_user": _extract_user(alert),
-        "windows_event_id": str(win_system.get("eventID"))[:20] if win_system.get("eventID") else None,
+        "windows_event_id": windows_event_id,
         "details": {
             "rule_groups": groups,
             "decoder": (alert.get("decoder") or {}).get("name"),

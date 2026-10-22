@@ -32,3 +32,14 @@ const ENDPOINT_STATUS_STYLE = {
 function endpointStatusStyle(status) {
   return ENDPOINT_STATUS_STYLE[status] || ENDPOINT_STATUS_STYLE.Unknown;
 }
+
+// Behavioral anomaly score (0-100, from the ML model) -> badge style. 70 is
+// the alert threshold the model is calibrated to; null means "not scored".
+const RISK_ANOMALY_THRESHOLD = 70;
+
+function riskStyle(score) {
+  if (score == null) return null;
+  if (score >= RISK_ANOMALY_THRESHOLD) return { badge: "badge-danger", label: "High" };
+  if (score >= 50) return { badge: "badge-warning", label: "Elevated" };
+  return { badge: "badge-success", label: "Normal" };
+}

@@ -17,47 +17,224 @@ INSTALL_DIR = r"C:\Program Files\AegisGuard"
 SCREEN_AGENT_PATH = INSTALL_DIR + r"\screen-agent.ps1"
 TASK_NAME = "AegisGuard Screen Agent"
 
-# Runs in the signed-in user's session, hidden. Captures the whole desktop,
-# scales it to at most 1280px wide, uploads it as JPEG, and waits as long as
-# the portal says (1s while someone is watching live, 10s otherwise).
+# Runs in the signed-in user's session, hidden: uploads screenshots for Live
+# Monitoring and, while the employee account is Locked in the portal, covers
+# the screen with a lock and blocks keyboard and mouse input until it is
+# unlocked there. See the comments inside the script.
 _SCREEN_AGENT = r"""$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class AgDpi { [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+// While the computer is locked: swallow every keyboard and mouse event with
+// low-level hooks (no administrator rights needed). Ctrl+Alt+Del can't be
+// blocked by any program; the lock survives it, see the agent's main loop.
+public static class AgInput {
+    public delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
+    [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
+    static HookProc swallow = Swallow;
+    static IntPtr keyboard = IntPtr.Zero;
+    static IntPtr mouse = IntPtr.Zero;
+    static IntPtr Swallow(int code, IntPtr wParam, IntPtr lParam) {
+        if (code < 0) return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+        return (IntPtr)1;
+    }
+    public static void Block() {
+        if (keyboard != IntPtr.Zero) return;
+        IntPtr module = GetModuleHandle(null);
+        keyboard = SetWindowsHookEx(13, swallow, module, 0);
+        mouse = SetWindowsHookEx(14, swallow, module, 0);
+    }
+    public static void Release() {
+        if (keyboard != IntPtr.Zero) { UnhookWindowsHookEx(keyboard); keyboard = IntPtr.Zero; }
+        if (mouse != IntPtr.Zero) { UnhookWindowsHookEx(mouse); mouse = IntPtr.Zero; }
+    }
+}
+'@
 [AgDpi]::SetProcessDPIAware() | Out-Null
 
 $Url = '__UPLOAD_URL__'
 $Token = '__TOKEN__'
+$StatusUrl = $Url -replace '/screen$', '/status'
 $Interval = 10
+
+# Lock state lives on the server (an employee account that is Locked in the
+# portal); this registry value only remembers it for when the portal can't be
+# reached, so a locked computer stays locked offline and across restarts.
+$MarkerKey = 'HKCU:\Software\AegisGuard'
+$PolicyKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
+# Emergency release for a local administrator: creating this file (it needs
+# administrator rights to write there) switches the lock off.
+$BreakGlass = 'C:\Program Files\AegisGuard\disable-lock'
 
 $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
 $quality = New-Object System.Drawing.Imaging.EncoderParameters 1
 $quality.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]60)
 
-while ($true) {
+function Set-LocalLock([bool]$On) {
     try {
-        $area = [System.Windows.Forms.SystemInformation]::VirtualScreen
-        $full = New-Object System.Drawing.Bitmap $area.Width, $area.Height
-        $graphics = [System.Drawing.Graphics]::FromImage($full)
-        $graphics.CopyFromScreen($area.Left, $area.Top, 0, 0, $full.Size)
-        $graphics.Dispose()
+        if ($On) {
+            New-Item -Path $MarkerKey -Force | Out-Null
+            Set-ItemProperty -Path $MarkerKey -Name Locked -Value 1 -Type DWord
+        } else {
+            Remove-ItemProperty -Path $MarkerKey -Name Locked -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
 
-        $width = [Math]::Min(1280, $area.Width)
-        $height = [int]($area.Height * $width / $area.Width)
-        $frame = New-Object System.Drawing.Bitmap $full, $width, $height
-        $full.Dispose()
+function Get-LocalLock {
+    try { return ((Get-ItemProperty -Path $MarkerKey -Name Locked -ErrorAction Stop).Locked -eq 1) } catch { return $false }
+}
 
-        $stream = New-Object System.IO.MemoryStream
-        $frame.Save($stream, $codec, $quality)
-        $frame.Dispose()
+# Task Manager is the one way a user could end this agent, so it is switched
+# off for their account while the computer is locked.
+function Set-TaskManager([bool]$Disabled) {
+    try {
+        if ($Disabled) {
+            New-Item -Path $PolicyKey -Force | Out-Null
+            Set-ItemProperty -Path $PolicyKey -Name DisableTaskMgr -Value 1 -Type DWord
+        } else {
+            Remove-ItemProperty -Path $PolicyKey -Name DisableTaskMgr -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
 
-        $reply = Invoke-RestMethod -Uri $Url -Method Post -Body $stream.ToArray() -ContentType 'image/jpeg' -Headers @{ 'X-AegisGuard-Token' = $Token } -TimeoutSec 10
-        $stream.Dispose()
-        if ($reply.next_interval) { $Interval = [Math]::Max(1, [int]$reply.next_interval) }
+function Get-Locked {
+    if (Test-Path $BreakGlass) { Set-LocalLock $false; return $false }
+    try {
+        $reply = Invoke-RestMethod -Uri $StatusUrl -Method Get -Headers @{ 'X-AegisGuard-Token' = $Token } -TimeoutSec 5
+        $locked = [bool]$reply.locked
+        Set-LocalLock $locked
+        return $locked
     } catch {
-        # Locked screen, network down, server restarting: just retry later.
-        $Interval = 10
+        $code = $null
+        try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+        # This computer was removed from the portal: nobody is left to unlock it.
+        if ($code -eq 401) { Set-LocalLock $false; return $false }
+        # Portal unreachable: stay as we were. A locked computer stays locked.
+        return (Get-LocalLock)
     }
-    Start-Sleep -Seconds $Interval
+}
+
+# Full-screen lock with all input blocked. Blocks until the portal says the
+# computer is unlocked (polled in the background so the hooks never stall).
+function Show-Lock {
+    Set-TaskManager $true
+    $state = @{ Pending = $null; Unlocked = $false }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.FormBorderStyle = 'None'
+    $form.StartPosition = 'Manual'
+    $form.ShowInTaskbar = $false
+    $form.TopMost = $true
+    $form.BackColor = [System.Drawing.Color]::FromArgb(20, 6, 10)
+    $area = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $form.Location = New-Object System.Drawing.Point $area.Left, $area.Top
+    $form.Size = New-Object System.Drawing.Size $area.Width, $area.Height
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Dock = 'Fill'
+    $title.TextAlign = 'MiddleCenter'
+    $title.ForeColor = [System.Drawing.Color]::FromArgb(251, 113, 133)
+    $title.Font = New-Object System.Drawing.Font 'Segoe UI', 30, ([System.Drawing.FontStyle]::Bold)
+    $title.Text = "THIS COMPUTER IS LOCKED`r`n`r`nYour administrator has locked this computer.`r`nContact your administrator to unlock it."
+    $form.Controls.Add($title)
+
+    $form.Add_FormClosing({
+        param($sender, $e)
+        if (-not $state.Unlocked -and ($e.CloseReason -eq 'UserClosing' -or $e.CloseReason -eq 'None')) { $e.Cancel = $true }
+    })
+    $form.Add_Shown({ $form.Activate() })
+
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 2000
+    $timer.Add_Tick({
+        $form.TopMost = $true
+        if (Test-Path $BreakGlass) { $state.Unlocked = $true; $form.Close(); return }
+        $task = $state.Pending
+        if ($task -ne $null) {
+            if (-not $task.IsCompleted) { return }
+            $state.Pending = $null
+            if (-not $task.IsFaulted -and -not $task.IsCanceled) {
+                try {
+                    if (-not [bool](($task.Result | ConvertFrom-Json).locked)) { $state.Unlocked = $true; $form.Close(); return }
+                } catch {}
+            }
+        }
+        $client = New-Object System.Net.WebClient
+        $client.Headers.Add('X-AegisGuard-Token', $Token)
+        $state.Pending = $client.DownloadStringTaskAsync($StatusUrl)
+    })
+
+    try {
+        [AgInput]::Block()
+        [System.Windows.Forms.Cursor]::Hide()
+        $timer.Start()
+        [System.Windows.Forms.Application]::Run($form)
+    } finally {
+        $timer.Stop()
+        [AgInput]::Release()
+        [System.Windows.Forms.Cursor]::Show()
+        $form.Dispose()
+        Set-TaskManager $false
+        Set-LocalLock $false
+    }
+}
+
+function Send-Frame {
+    $area = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $full = New-Object System.Drawing.Bitmap $area.Width, $area.Height
+    $graphics = [System.Drawing.Graphics]::FromImage($full)
+    $graphics.CopyFromScreen($area.Left, $area.Top, 0, 0, $full.Size)
+    $graphics.Dispose()
+
+    $width = [Math]::Min(1280, $area.Width)
+    $height = [int]($area.Height * $width / $area.Width)
+    $frame = New-Object System.Drawing.Bitmap $full, $width, $height
+    $full.Dispose()
+
+    $stream = New-Object System.IO.MemoryStream
+    $frame.Save($stream, $codec, $quality)
+    $frame.Dispose()
+
+    $reply = Invoke-RestMethod -Uri $Url -Method Post -Body $stream.ToArray() -ContentType 'image/jpeg' -Headers @{ 'X-AegisGuard-Token' = $Token } -TimeoutSec 10
+    $stream.Dispose()
+    return $reply
+}
+
+# --- main loop ---
+# Captures the whole desktop, scales it to at most 1280px wide, uploads it as
+# JPEG, and waits as long as the portal says (1s while someone is watching
+# live, 10s otherwise). Every few seconds it also asks whether the computer
+# has been locked.
+# A computer that is already locked when the agent starts (after a restart or a
+# sign-out) is locked straight away; otherwise undo what a crash during a lock
+# may have left behind.
+if (Get-Locked) { Show-Lock } else { Set-TaskManager $false }
+$sinceFrame = $Interval
+$sinceStatus = 0
+while ($true) {
+    if ($sinceStatus -ge 3) {
+        $sinceStatus = 0
+        if (Get-Locked) { Show-Lock; $sinceFrame = $Interval }
+    }
+    if ($sinceFrame -ge $Interval) {
+        $sinceFrame = 0
+        try {
+            $reply = Send-Frame
+            if ($reply.next_interval) { $Interval = [Math]::Max(1, [int]$reply.next_interval) }
+        } catch {
+            # Locked screen, network down, server restarting: just retry later.
+            $Interval = 10
+        }
+    }
+    Start-Sleep -Seconds 1
+    $sinceFrame++
+    $sinceStatus++
 }
 """
 
@@ -67,7 +244,7 @@ while ($true) {
 _SETUP_SCREEN_AGENT = r"""$ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path '__INSTALL_DIR__' | Out-Null
 [IO.File]::WriteAllBytes('__AGENT_PATH__', [Convert]::FromBase64String($env:AG_SCREEN_AGENT))
-$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "__AGENT_PATH__"'
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File "__AGENT_PATH__"'
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
@@ -111,9 +288,9 @@ echo.
 echo  Monitoring follows your organisation's IT and privacy policy.
 echo  Continue only if the user of this computer has been informed.
 echo.
-echo  NOTE: the live screen view also needs a one-time Windows
-echo  Defender exclusion by an administrator - see the end of this
-echo  window. Security event collection works without it.
+echo  NOTE: so that the live screen view and the lock screen can run,
+echo  this installer adds the AegisGuard folder to the Windows
+echo  Defender exclusions.
 echo ============================================================
 choice /C YN /M "Install AegisGuard monitoring on this computer"
 if errorlevel 2 (
@@ -121,6 +298,13 @@ if errorlevel 2 (
     pause
     exit /b 1
 )
+
+rem Tell AegisGuard an install has started, so what this installer does
+rem (PowerShell, registry and audit changes) isn't judged as suspicious
+rem behavior and can't lock this computer. Failure to reach it is ignored.
+set "AG_MAINT_URL={maintenance_url}"
+set "AG_TOKEN={screen_token}"
+powershell -NoProfile -Command "try {{ Invoke-RestMethod -Uri $env:AG_MAINT_URL -Method Post -Headers @{{'X-AegisGuard-Token'=$env:AG_TOKEN}} -TimeoutSec 10 | Out-Null }} catch {{}}"
 
 set "MANAGER={manager}"
 set "MSI_URL={msi_url}"
@@ -163,10 +347,15 @@ rem so it learns which programs each computer normally runs. Use the
 rem subcategory GUID, not its English name, so this works on non-English
 rem (e.g. Chinese) Windows too. Best-effort: never fail the install over it.
 auditpol /set /subcategory:"{{0CCE922B-69AE-11D9-BED3-505054503030}}" /success:enable /failure:enable >nul 2>&1
+rem Event 4625 (failed logon) feeds the "3 wrong passwords" alert.
+auditpol /set /subcategory:"{{0CCE9215-69AE-11D9-BED3-505054503030}}" /success:enable /failure:enable >nul 2>&1
 rem Include the command line in 4688 events (e.g. "powershell -enc ...").
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f >nul 2>&1
 
 echo [6/6] Setting up the live screen view...
+rem Defender would block the screen component, so exclude its folder first.
+rem If Windows Tamper Protection refuses, the manual steps are shown at the end.
+powershell -NoProfile -Command "try {{ Add-MpPreference -ExclusionPath '{install_dir}' }} catch {{}}" >nul 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {setup_encoded}
 if %errorlevel% neq 0 goto fail
 
@@ -230,6 +419,8 @@ def build_installer(company: str, employee: str, key_line: str, screen_token: st
         manager=settings.wazuh_manager_address,
         msi_url=settings.wazuh_agent_msi_url,
         key_line=key_line,
+        maintenance_url=settings.portal_public_url.rstrip("/") + "/api/agent/maintenance",
+        screen_token=screen_token,
         install_dir=INSTALL_DIR,
         task_name=TASK_NAME,
         # Base64 keeps the multi-line scripts out of cmd.exe's quoting rules.

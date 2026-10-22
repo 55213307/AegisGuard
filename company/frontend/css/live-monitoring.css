@@ -73,3 +73,53 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* A computer with an active behavior anomaly (last 15 minutes). */
+.endpoint-card-alert {
+  border-color: var(--danger-text);
+  box-shadow: 0 0 0 1px var(--danger-text), 0 0 16px rgba(251, 113, 133, 0.35);
+  animation: endpoint-alert-pulse 1.4s ease-in-out infinite;
+}
+
+.endpoint-card-flag {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+@keyframes endpoint-alert-pulse {
+  50% {
+    box-shadow: 0 0 0 2px var(--danger-text), 0 0 30px rgba(251, 113, 133, 0.65);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .endpoint-card-alert {
+    animation: none;
+  }
+}
+
+/* A locked computer: solid red, no pulse, dimmed screen. */
+.endpoint-card-locked {
+  border-color: var(--danger-text);
+  box-shadow: 0 0 0 1px var(--danger-text);
+}
+
+.endpoint-card-locked .endpoint-card-preview {
+  filter: grayscale(1) brightness(0.55);
+}
+
+.endpoint-card-flag {
+  display: block;
+  margin-top: 6px;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

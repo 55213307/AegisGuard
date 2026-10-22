@@ -213,6 +213,12 @@
   color: var(--text-muted);
 }
 
+/* Risk score badge in the anomalies list: fixed width so the text lines up. */
+.alert-item > .badge {
+  min-width: 40px;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 1300px) {
   .stats-grid {
     grid-template-columns: repeat(3, 1fr);

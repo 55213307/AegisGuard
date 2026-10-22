@@ -16,6 +16,7 @@ const tableBody = document.getElementById("logsTableBody");
 const searchInput = document.getElementById("logSearchInput");
 const severityFilter = document.getElementById("severityFilter");
 const eventTypeFilter = document.getElementById("eventTypeFilter");
+const riskFilter = document.getElementById("riskFilter");
 const dateRangeFilter = document.getElementById("dateRangeFilter");
 const exportLogsBtn = document.getElementById("exportLogsBtn");
 
@@ -36,6 +37,8 @@ function getFilteredLogs() {
   const query = searchInput.value.trim().toLowerCase();
   const severity = severityFilter.value;
   const eventType = eventTypeFilter.value;
+  const risk = riskFilter.value;
+  const minRisk = risk === "anomaly" ? RISK_ANOMALY_THRESHOLD : risk === "elevated" ? 50 : null;
 
   return allLogs.filter((log) => {
     const matchesQuery =
@@ -45,15 +48,22 @@ function getFilteredLogs() {
       log.description.toLowerCase().includes(query);
     const matchesSeverity = !severity || log.severity === severity;
     const matchesEventType = !eventType || log.event_type === eventType;
-    return matchesQuery && matchesSeverity && matchesEventType;
+    const matchesRisk = minRisk === null || (log.risk_score != null && log.risk_score >= minRisk);
+    return matchesQuery && matchesSeverity && matchesEventType && matchesRisk;
   });
+}
+
+function riskCell(log) {
+  const style = riskStyle(log.risk_score);
+  if (!style) return "--";
+  return `<span class="badge ${style.badge}" title="${escapeHtml(style.label)}">${log.risk_score}</span>`;
 }
 
 function renderLogsTable() {
   const filtered = getFilteredLogs();
 
   if (filtered.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No log entries match your filters.</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="7" class="empty-state">No log entries match your filters.</td></tr>`;
     return;
   }
 
@@ -66,7 +76,8 @@ function renderLogsTable() {
           <td>${log.user || "--"}</td>
           <td>${log.event_type}</td>
           <td><span class="badge ${SEVERITY_BADGE_CLASS[log.severity] || "badge-success"}">${SEVERITY_LABEL[log.severity] || log.severity}</span></td>
-          <td>${log.description}</td>
+          <td>${riskCell(log)}</td>
+          <td>${log.description}${log.risk_reason ? `<span class="risk-reason">${escapeHtml(log.risk_reason)}</span>` : ""}</td>
         </tr>
       `
     )
@@ -82,12 +93,13 @@ async function loadLogs() {
     renderLogsTable();
   } catch (err) {
     console.error("Failed to load security logs", err);
-    tableBody.innerHTML = `<tr><td colspan="6" class="empty-state">Could not load security logs. Please try again later.</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Could not load security logs. Please try again later.</td></tr>`;
   }
 }
 
 searchInput.addEventListener("input", renderLogsTable);
 severityFilter.addEventListener("change", renderLogsTable);
+riskFilter.addEventListener("change", renderLogsTable);
 eventTypeFilter.addEventListener("change", renderLogsTable);
 dateRangeFilter.addEventListener("change", loadLogs);
 
@@ -103,7 +115,7 @@ exportLogsBtn.addEventListener("click", () => {
   const rows = getFilteredLogs();
   if (rows.length === 0) return;
 
-  const header = ["Timestamp", "Endpoint", "User", "Event Type", "Severity", "Description"];
+  const header = ["Timestamp", "Endpoint", "User", "Event Type", "Severity", "Risk Score", "Risk Reason", "Description"];
   const lines = [header.map(csvCell).join(",")];
   for (const log of rows) {
     lines.push([
@@ -112,6 +124,8 @@ exportLogsBtn.addEventListener("click", () => {
       log.user || "",
       log.event_type || "",
       SEVERITY_LABEL[log.severity] || log.severity,
+      log.risk_score == null ? "" : log.risk_score,
+      log.risk_reason || "",
       log.description || "",
     ].map(csvCell).join(","));
   }

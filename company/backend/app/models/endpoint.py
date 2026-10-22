@@ -25,5 +25,8 @@ class Endpoint(Base):
     wazuh_agent_id: Mapped[str] = mapped_column(String(10), unique=True)
     wazuh_agent_name: Mapped[str] = mapped_column(String(128), unique=True)
     created_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # While an installer is working on the computer (it tells the portal when it
+    # starts), events up to this time aren't scored and can't lock the computer.
+    maintenance_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     employee: Mapped["Employee"] = relationship(back_populates="endpoint")  # noqa: F821

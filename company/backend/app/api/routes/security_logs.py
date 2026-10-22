@@ -39,6 +39,8 @@ def _to_item(event: SecurityEvent, endpoint_name: str | None) -> SecurityLogItem
         event_type=event.event_type,
         severity=(event.severity or "info").lower(),
         description=event.rule_description,
+        risk_score=event.risk_score,
+        risk_reason=event.risk_reason,
     )
 
 

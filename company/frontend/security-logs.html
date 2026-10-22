@@ -75,6 +75,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
         </label>
         <label class="control-select">
+          <select id="riskFilter">
+            <option value="">Risk: All</option>
+            <option value="anomaly">Behavior anomalies (70+)</option>
+            <option value="elevated">Elevated and above (50+)</option>
+          </select>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
+        </label>
+        <label class="control-select">
           <select id="dateRangeFilter">
             <option value="7">Last 7 days</option>
             <option value="30">Last 30 days</option>
@@ -94,11 +102,12 @@
               <th>User</th>
               <th>Event Type</th>
               <th>Severity</th>
+              <th>Risk</th>
               <th>Description</th>
             </tr>
           </thead>
           <tbody id="logsTableBody">
-            <tr><td colspan="6" class="empty-state">Loading logs&hellip;</td></tr>
+            <tr><td colspan="7" class="empty-state">Loading logs&hellip;</td></tr>
           </tbody>
         </table>
         </div>
@@ -107,7 +116,9 @@
   </div>
 
   <script src="js/api.js"></script>
+  <script src="js/format.js"></script>
   <script src="js/sidebar.js"></script>
+  <script src="js/anomaly-alerts.js"></script>
   <script src="js/security-logs.js"></script>
 </body>
 </html>

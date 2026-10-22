@@ -43,6 +43,15 @@ class EmployeeOut(BaseModel):
     os_name: str | None
     agent_version: str | None
     last_seen_time: datetime | None
+    # Set while the account is Locked: why, and since when (the computer is locked too).
+    lock_reason: str | None = None
+    locked_at: datetime | None = None
+    # Highest behavioral risk score (0-100) of this computer's events in the
+    # last 24 hours; None when it has none scored.
+    risk_24h: int | None = None
+    # Highest risk score of the last 15 minutes if it reached the alert
+    # threshold, else None: the computer has an active anomaly right now.
+    risk_active: int | None = None
 
 
 class EmployeeListResponse(BaseModel):
@@ -58,6 +67,8 @@ class SecurityEventOut(BaseModel):
     rule_description: str | None
     event_user: str | None
     windows_event_id: str | None
+    risk_score: int | None
+    risk_reason: str | None
 
     model_config = {"from_attributes": True}
 

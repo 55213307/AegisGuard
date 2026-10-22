@@ -32,7 +32,7 @@ function renderAccountsTable() {
         <tr data-account-id="${account.id}">
           <td class="cell-primary">${escapeHtml(account.employee_username)}</td>
           <td>${escapeHtml(account.employee_email)}</td>
-          <td><span class="badge ${isLocked ? "badge-danger" : "badge-success"}">${isLocked ? "Locked" : "Active"}</span></td>
+          <td><span class="badge ${isLocked ? "badge-danger" : "badge-success"}"${isLocked && account.lock_reason ? ` title="${escapeHtml(account.lock_reason)}"` : ""}>${isLocked ? "Locked" : "Active"}</span></td>
           <td>${timeAgo(account.last_seen_time)}</td>
           <td>
             <div class="row-actions">

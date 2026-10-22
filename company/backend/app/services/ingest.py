@@ -19,6 +19,8 @@ from app.db.session import SessionLocal
 from app.models.endpoint import Endpoint
 from app.models.security_event import SecurityEvent
 from app.services.alerts import agent_id_of, parse_alert
+from app.services import endpoint_lock
+from app.services.ml import registry, scoring
 
 log = logging.getLogger("aegisguard.ingest")
 
@@ -55,6 +57,21 @@ def _read_new_lines(path: str, state: dict) -> list[bytes]:
     return [line for line in chunk[:last_newline].split(b"\n") if line.strip()]
 
 
+def _outside_maintenance(rows: list[dict], windows: dict) -> list[dict]:
+    """The rows that are to be judged (scored, and able to lock the computer):
+    those not inside their endpoint's maintenance window. The others get no
+    risk score."""
+    judged = []
+    for row in rows:
+        until = windows.get(row["endpoint_id"])
+        if until is not None and row["event_time"] <= until:
+            row["risk_score"] = None
+            row["risk_reason"] = None
+        else:
+            judged.append(row)
+    return judged
+
+
 def _store(db, lines: list[bytes], agents: dict[str, tuple[int, int]]) -> int:
     rows = []
     for raw in lines:
@@ -73,17 +90,31 @@ def _store(db, lines: list[bytes], agents: dict[str, tuple[int, int]]) -> int:
 
     if not rows:
         return 0
+    # While an installer is working on a computer its events aren't judged.
+    judged = _outside_maintenance(rows, endpoint_lock.maintenance_windows(db, {r["endpoint_id"] for r in rows}))
+    try:
+        scoring.apply(judged, registry.get_model, scoring.failed_logon_counter(db, judged))
+    except Exception:  # a scoring problem must never cost us the alerts themselves
+        log.exception("Scoring new events failed; storing them unscored")
+        for row in judged:
+            row.setdefault("risk_score", None)
+            row.setdefault("risk_reason", None)
     # ON CONFLICT DO NOTHING makes rowcount unreliable, so count what RETURNING
     # actually yields — conflicting (already-seen) rows return nothing.
     stmt = (
         pg_insert(SecurityEvent.__table__)
         .values(rows)
         .on_conflict_do_nothing(index_elements=["wazuh_alert_id"])
-        .returning(SecurityEvent.id)
+        .returning(SecurityEvent.wazuh_alert_id)
     )
-    inserted = len(db.execute(stmt).fetchall())
+    stored_ids = {row[0] for row in db.execute(stmt).fetchall()}
     db.commit()
-    return inserted
+    try:  # only events that were really new, and a failure here must not undo the storing
+        endpoint_lock.auto_lock(db, [r for r in judged if r["wazuh_alert_id"] in stored_ids])
+    except Exception:
+        db.rollback()
+        log.exception("Automatic locking after new events failed")
+    return len(stored_ids)
 
 
 def _run() -> None:

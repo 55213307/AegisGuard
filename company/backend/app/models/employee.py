@@ -33,6 +33,9 @@ class Employee(Base):
         Enum(EmployeeStatus, native_enum=False), default=EmployeeStatus.ACTIVE
     )
     created_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Why and since when the account (and so the employee's computer) is locked.
+    lock_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     company: Mapped["Customer"] = relationship()  # noqa: F821
     # cascade + passive_deletes so deleting an employee deletes its endpoint

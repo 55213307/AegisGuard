@@ -37,11 +37,17 @@ function renderGrid() {
     return;
   }
 
+  // Computers with an active anomaly come first, so they can't be missed.
+  const urgency = (a) => (a.employee_status === "Locked" ? 2 : 0) + (a.risk_active != null ? 1 : 0);
+  visible.sort((a, b) => urgency(b) - urgency(a));
+
   visible.forEach((account) => {
     const style = endpointStatusStyle(account.endpoint_status);
+    const alerting = account.risk_active != null;
+    const locked = account.employee_status === "Locked";
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "endpoint-card";
+    card.className = "endpoint-card" + (alerting ? " endpoint-card-alert" : "") + (locked ? " endpoint-card-locked" : "");
     card.dataset.accountId = account.id;
     const thumbnail = thumbnailUrls.get(account.id);
     card.innerHTML = `
@@ -54,6 +60,8 @@ function renderGrid() {
           <span class="badge ${style.badge}">${escapeHtml(account.endpoint_status)}</span>
         </div>
         <p class="endpoint-card-user">Last seen: ${timeAgo(account.last_seen_time)}</p>
+        ${locked ? `<span class="endpoint-card-flag" title="${escapeHtml(account.lock_reason || "")}">&#128274; LOCKED${account.lock_reason ? ` &middot; ${escapeHtml(account.lock_reason)}` : ""}</span>` : ""}
+        ${alerting ? `<span class="endpoint-card-flag">&#9888; Anomaly detected &middot; ${account.risk_active}</span>` : ""}
       </div>
     `;
     card.addEventListener("click", () => EndpointDetail.open(account, { onChanged: loadEndpoints }));
@@ -91,6 +99,14 @@ async function refreshThumbnails() {
     }
   }
 }
+
+// A new anomaly (js/anomaly-alerts.js): mark the computer right away instead of
+// waiting for the next periodic refresh.
+// The lock is stored a moment after the event that causes it, so look again shortly.
+window.addEventListener("anomaly-detected", () => {
+  loadEndpoints();
+  setTimeout(loadEndpoints, 4000);
+});
 
 searchInput.addEventListener("input", renderGrid);
 statusFilter.addEventListener("change", renderGrid);

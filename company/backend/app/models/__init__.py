@@ -2,6 +2,7 @@ from app.models.account import Account, AccountStatus
 from app.models.customer import Customer
 from app.models.employee import Employee, EmployeeStatus
 from app.models.endpoint import Endpoint
+from app.models.lock_event import LockEvent
 from app.models.security_event import SecurityEvent
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "Employee",
     "EmployeeStatus",
     "Endpoint",
+    "LockEvent",
     "SecurityEvent",
 ]

@@ -32,4 +32,9 @@ class SecurityEvent(Base):
     event_user: Mapped[str | None] = mapped_column(String(120), nullable=True)
     windows_event_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     details: Mapped[dict] = mapped_column(JSONB)
+    # Behavioral anomaly score (app/services/ml): 0-100 for events that are the
+    # user's own actions, with a plain-language reason when it is elevated.
+    # NULL when the event isn't a user action or the endpoint has no model yet.
+    risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    risk_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

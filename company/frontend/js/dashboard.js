@@ -188,6 +188,29 @@ function renderAlerts(alerts) {
     .join("");
 }
 
+function renderAnomalies(anomalies, count24h) {
+  document.getElementById("anomalyCount").textContent =
+    count24h ? `${count24h} in the last 24h \u2192` : "View logs \u2192";
+  const list = document.getElementById("anomalyList");
+  if (!anomalies.length) {
+    list.innerHTML = `<li class="alert-item"><span class="alert-text"><span class="alert-title">No behavior anomalies in the last 7 days.</span></span></li>`;
+    return;
+  }
+  list.innerHTML = anomalies
+    .map((a) => {
+      const style = riskStyle(a.risk_score) || { badge: "badge-danger" };
+      return `
+      <li class="alert-item">
+        <span class="badge ${style.badge}">${a.risk_score}</span>
+        <span class="alert-text">
+          <span class="alert-title">${escapeHtml(a.risk_reason || a.rule_description || a.event_type || "Anomalous behavior")}</span>
+          <span class="alert-meta">${escapeHtml(a.endpoint_name)} &middot; ${timeAgo(a.event_time)}</span>
+        </span>
+      </li>`;
+    })
+    .join("");
+}
+
 let animatedOnce = false;
 
 async function loadDashboard() {
@@ -199,6 +222,7 @@ async function loadDashboard() {
     renderSeverityDonut(data.severity_7d, !animatedOnce);
     renderServices(data.services);
     renderAlerts(data.recent_alerts);
+    renderAnomalies(data.anomalies || [], data.stats.anomalies_24h);
     animatedOnce = true;
   } catch (err) {
     console.error("Failed to load dashboard", err);
@@ -218,3 +242,5 @@ window.addEventListener("resize", () => {
 renderWelcomeHeading();
 loadDashboard();
 setInterval(loadDashboard, 30000);
+// A new anomaly (js/anomaly-alerts.js): update the counts and lists now.
+window.addEventListener("anomaly-detected", loadDashboard);

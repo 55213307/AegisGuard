@@ -11,6 +11,8 @@ const EndpointDetail = (() => {
   const scrim = document.getElementById("detailScrim");
   const errorEl = document.getElementById("detailError");
   const refreshBtn = document.getElementById("detailRefreshBtn");
+  const lockBtn = document.getElementById("detailLockBtn");
+  const lockBanner = document.getElementById("detailLockBanner");
   const downloadBtn = document.getElementById("detailDownloadBtn");
   const screenImg = document.getElementById("detailScreenImg");
   const placeholder = document.getElementById("detailScreenPlaceholder");
@@ -95,6 +97,26 @@ const EndpointDetail = (() => {
     }
   }
 
+  function riskText(score) {
+    const style = riskStyle(score);
+    return style ? `${score} \u00b7 ${style.label}` : "—";
+  }
+
+  const isLocked = () => account && account.employee_status === "Locked";
+
+  // The lock banner and the Lock / Unlock button follow the account's state.
+  function renderLock() {
+    const locked = isLocked();
+    lockBanner.hidden = !locked;
+    if (locked) {
+      const since = account.locked_at ? ` since ${timeAgo(account.locked_at).toLowerCase()}` : "";
+      lockBanner.textContent = `\u{1F512} This computer is locked${since}. ${account.lock_reason || ""}`.trim();
+    }
+    lockBtn.textContent = locked ? "Unlock Computer" : "Lock Computer";
+    lockBtn.className = locked ? "btn btn-primary" : "btn btn-ghost";
+    lockBtn.disabled = !account.endpoint_name; // nothing to lock until a computer is enrolled
+  }
+
   function render(next) {
     account = next;
     const style = endpointStatusStyle(account.endpoint_status);
@@ -103,13 +125,15 @@ const EndpointDetail = (() => {
     badge.className = `badge ${style.badge}`;
     badge.textContent = account.endpoint_status;
 
+    renderLock();
+
     const rows = [
       ["Assigned User", account.employee_username],
       ["IP Address", account.ip_address || "—"],
       ["Operating System", account.os_name || "—"],
       ["Agent Version", account.agent_version || "—"],
       ["Last Seen", timeAgo(account.last_seen_time)],
-      ["Risk Score", "—"],
+      ["Risk Score (24h peak)", riskText(account.risk_24h)],
     ];
     document.getElementById("detailInfoList").innerHTML = rows
       .map(([label, value]) => `<div class="info-row"><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`)
@@ -126,12 +150,12 @@ const EndpointDetail = (() => {
   }
 
   async function loadActivity(forAccount) {
-    activityEl.innerHTML = `<p class="detail-empty">Loading recent activity…</p>`;
+    activityEl.innerHTML = `<p class="detail-empty">Loading recent problems…</p>`;
     try {
       const data = await apiFetch(`/api/accounts/${forAccount.id}/events?limit=15`);
       if (account !== forAccount) return; // dialog switched/closed meanwhile
       if (!data.items.length) {
-        activityEl.innerHTML = `<p class="detail-empty">No activity recorded for this endpoint yet.</p>`;
+        activityEl.innerHTML = `<p class="detail-empty">No problems detected on this endpoint.</p>`;
         return;
       }
       activityEl.innerHTML = data.items
@@ -140,17 +164,20 @@ const EndpointDetail = (() => {
           const badge = SEVERITY_BADGE[e.severity] || "badge-success";
           const desc = e.rule_description || "";
           const user = e.event_user ? ` · ${escapeHtml(e.event_user)}` : "";
+          const risk = riskStyle(e.risk_score);
+          const riskBadge = risk ? `<span class="badge ${risk.badge}">${e.risk_score}</span> ` : "";
+          const reason = e.risk_reason ? `<span class="risk-reason">${escapeHtml(e.risk_reason)}</span>` : "";
           return `
             <div class="activity-row">
               <span class="activity-time">${escapeHtml(formatEventTime(e.event_time))}</span>
               <span class="badge ${badge}">${escapeHtml(label)}</span>
-              <span class="activity-desc">${escapeHtml(desc)}${user}</span>
+              <span class="activity-desc">${riskBadge}${escapeHtml(desc)}${user}${reason}</span>
             </div>`;
         })
         .join("");
     } catch (err) {
       if (account !== forAccount) return;
-      activityEl.innerHTML = `<p class="detail-empty">Could not load recent activity.</p>`;
+      activityEl.innerHTML = `<p class="detail-empty">Could not load recent problems.</p>`;
     }
   }
 
@@ -188,6 +215,22 @@ const EndpointDetail = (() => {
       errorEl.textContent = err.message || "Could not refresh this endpoint. Please try again.";
     } finally {
       refreshBtn.disabled = false;
+    }
+  });
+
+  lockBtn.addEventListener("click", async () => {
+    if (!account) return;
+    const locking = !isLocked();
+    if (locking && !window.confirm(`Lock ${account.endpoint_name || account.employee_username}? The user will be locked out of this computer until you unlock it here.`)) return;
+    errorEl.textContent = "";
+    lockBtn.disabled = true;
+    try {
+      render(await apiFetch(`/api/accounts/${account.id}/${locking ? "lock" : "unlock"}`, { method: "POST" }));
+      onChanged();
+    } catch (err) {
+      errorEl.textContent = err.message || "Could not change the lock. Please try again.";
+    } finally {
+      lockBtn.disabled = !account || !account.endpoint_name;
     }
   });
 

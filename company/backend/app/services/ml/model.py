@@ -22,12 +22,13 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
 
 from app.services.ml.features import (
-    FEATURE_NAMES, action_key, event_features, is_admin_tool, is_user_action, is_weekend, local_hour,
+    FEATURE_NAMES, LOCAL_TZ, action_key, event_features, is_admin_tool, is_user_action, is_weekend, local_hour,
 )  # fmt: skip
 
 # Risk at/above this counts as an anomaly worth surfacing.
@@ -162,6 +163,16 @@ class BehaviorModel:
             risk = int(round(100 * (1 - (1 - behaviour) * (1 - novelty))))
             out[i] = Score(risk, behaviour, novelty, risk >= ANOMALY_RISK_THRESHOLD)
         return out
+
+    def typical_time(self, like: datetime) -> datetime:
+        """A usual moment for this endpoint: the busiest hour of its baseline,
+        on a weekday of the week `like` falls in. Scoring an event as if it
+        happened then judges what was done without holding its time of day or
+        weekday against it (approved overtime)."""
+        hour = self._hours.most_common(1)[0][0] if self._hours else 12
+        local = like.astimezone(LOCAL_TZ)
+        wednesday = local - timedelta(days=local.weekday()) + timedelta(days=2)
+        return wednesday.replace(hour=hour, minute=30, second=0, microsecond=0)
 
     def score_one(self, row: dict) -> Score:
         return self.score_many([row])[0]

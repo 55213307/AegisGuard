@@ -814,7 +814,7 @@ svg {
   }
 }
 
-/* Behavior-anomaly pop-ups (js/anomaly-alerts.js) */
+/* Behavior-anomaly pop-ups (js/anomaly-alerts.js): the same plain card as the rest of the portal */
 #anomalyToasts {
   position: fixed;
   top: 20px;
@@ -822,8 +822,8 @@ svg {
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: min(380px, calc(100vw - 32px));
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
   pointer-events: none;
 }
 
@@ -831,83 +831,68 @@ svg {
   pointer-events: auto;
   position: relative;
   display: flex;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--danger-text);
-  border-left-width: 5px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 34px 12px 14px;
   background: var(--bg-surface);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55), 0 0 18px rgba(251, 113, 133, 0.25);
-  animation: anomaly-toast-in 0.28s ease-out;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
-.anomaly-toast-critical {
-  background: var(--danger-bg);
-}
-
-.anomaly-toast-icon {
+.anomaly-toast-dot {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
+  background: var(--warning-text);
+}
+
+.anomaly-toast[data-severity="critical"] .anomaly-toast-dot {
   background: var(--danger-text);
-  color: var(--bg-page);
 }
 
 .anomaly-toast-body {
-  min-width: 0;
   flex: 1;
+  min-width: 0;
 }
 
 .anomaly-toast-title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.4;
   color: var(--text-primary);
 }
 
-.anomaly-toast-endpoint {
-  margin: 2px 0 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.anomaly-toast-reason {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--warning-text);
-}
-
-.anomaly-toast-hint {
-  margin: 6px 0 0;
+.anomaly-toast-meta {
+  margin: 3px 0 0;
   font-size: 12px;
   color: var(--text-muted);
 }
 
 .anomaly-toast-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 10px;
+  gap: 14px;
+  margin-top: 8px;
 }
 
-.anomaly-toast-link,
-.anomaly-toast-mute {
+.anomaly-toast-actions a,
+.anomaly-toast-actions button {
   padding: 0;
   border: 0;
   background: none;
   font: inherit;
   font-size: 12px;
-  color: var(--brand-blue-light);
-  cursor: pointer;
+  color: var(--text-secondary);
   text-decoration: none;
+  cursor: pointer;
 }
 
-.anomaly-toast-mute {
-  color: var(--text-muted);
+.anomaly-toast-actions a:hover,
+.anomaly-toast-actions button:hover,
+.anomaly-toast-close:hover {
+  color: var(--text-primary);
 }
 
 .anomaly-toast-close {
@@ -917,27 +902,10 @@ svg {
   padding: 0 4px;
   border: 0;
   background: none;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   color: var(--text-muted);
   cursor: pointer;
-}
-
-@keyframes anomaly-toast-in {
-  from {
-    opacity: 0;
-    transform: translateX(24px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .anomaly-toast {
-    animation: none;
-  }
 }
 
 /* Shown at the top of the endpoint detail dialog while the computer is locked. */
@@ -949,4 +917,71 @@ svg {
   background: var(--danger-bg);
   color: var(--danger-text);
   font-size: 13px;
+}
+
+/* Overtime approved for this computer (endpoint detail dialog). */
+.detail-overtime-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--warning-text);
+  border-radius: var(--radius-md);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 13px;
+}
+
+/* A neutral note above the detail rows (e.g. the setup exemption window). */
+.detail-info-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* A small text button inside a detail row, e.g. "Edit" next to the working hours. */
+.link-btn {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--brand-blue-light);
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+/* Optional start / end of the working day in the Create Account dialog. */
+.form-optional {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.form-time-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.form-time-row .form-input {
+  flex: 1;
+  min-width: 0;
+  color-scheme: dark;
+}
+
+.form-time-to {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.form-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }

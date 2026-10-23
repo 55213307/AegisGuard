@@ -3,10 +3,25 @@ const ICON_LOCK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICON_UNLOCK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5.5" y="10.5" width="13" height="9" rx="1.6"/><path d="M8.5 10.5V7.8a3.5 3.5 0 0 1 6.7-1.4"/></svg>`;
 const ICON_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16"/><path d="M9 7V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V7"/><path d="M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7"/></svg>`;
 
+// The Status column follows the computer, not just the account: how often the
+// list is refreshed, so Online / Offline / Locked changes show up on their own.
+const STATUS_REFRESH_MS = 10000;
+
 let allAccounts = [];
 
 const tableBody = document.getElementById("accountsTableBody");
 const searchInput = document.getElementById("accountSearchInput");
+
+// A locked computer shows Locked (with the reason on hover); otherwise the
+// computer's live state from Wazuh: Online, Offline, Connecting, Not installed.
+function statusBadge(account) {
+  if (account.employee_status === "Locked") {
+    const reason = account.lock_reason ? ` title="${escapeHtml(account.lock_reason)}"` : "";
+    return `<span class="badge badge-danger"${reason}>Locked</span>`;
+  }
+  const style = endpointStatusStyle(account.endpoint_status);
+  return `<span class="badge ${style.badge}">${escapeHtml(account.endpoint_status)}</span>`;
+}
 
 function renderAccountsTable() {
   const query = searchInput.value.trim().toLowerCase();
@@ -32,7 +47,7 @@ function renderAccountsTable() {
         <tr data-account-id="${account.id}">
           <td class="cell-primary">${escapeHtml(account.employee_username)}</td>
           <td>${escapeHtml(account.employee_email)}</td>
-          <td><span class="badge ${isLocked ? "badge-danger" : "badge-success"}"${isLocked && account.lock_reason ? ` title="${escapeHtml(account.lock_reason)}"` : ""}>${isLocked ? "Locked" : "Active"}</span></td>
+          <td>${statusBadge(account)}</td>
           <td>${timeAgo(account.last_seen_time)}</td>
           <td>
             <div class="row-actions">
@@ -47,13 +62,15 @@ function renderAccountsTable() {
     .join("");
 }
 
-async function loadAccounts() {
+async function loadAccounts({ silent = false } = {}) {
   try {
     const data = await apiFetch("/api/accounts");
     allAccounts = data.items;
     renderAccountsTable();
   } catch (err) {
     console.error("Failed to load accounts", err);
+    // A failed background refresh keeps what is already on screen.
+    if (silent && allAccounts.length > 0) return;
     tableBody.innerHTML = `<tr><td colspan="5" class="empty-state">Could not load accounts. Please try again later.</td></tr>`;
   }
 }
@@ -73,7 +90,12 @@ tableBody.addEventListener("click", async (event) => {
     return;
   }
 
-  if (action === "delete" && !confirm(`Delete ${account.employee_username}'s account? Their computer will stop being monitored.`)) return;
+  if (action === "delete") {
+    const uninstall = account.endpoint_name
+      ? " AegisGuard will also uninstall itself from their computer the next time it is online (within about 5 minutes)."
+      : "";
+    if (!confirm(`Delete ${account.employee_username}'s account? Their computer will stop being monitored.${uninstall} This can't be undone.`)) return;
+  }
 
   button.disabled = true;
   try {
@@ -155,9 +177,19 @@ createForm.addEventListener("submit", async (event) => {
 
   const username = document.getElementById("newUsername").value.trim();
   const email = document.getElementById("newEmail").value.trim();
+  const workStart = document.getElementById("newWorkStart").value;
+  const workEnd = document.getElementById("newWorkEnd").value;
 
   if (!username || !email) {
     createError.textContent = "Username and email are required.";
+    return;
+  }
+  if (Boolean(workStart) !== Boolean(workEnd)) {
+    createError.textContent = "Give both the start and the end of the working day, or leave both empty.";
+    return;
+  }
+  if (workStart && workStart === workEnd) {
+    createError.textContent = "The end of the working day must differ from the start.";
     return;
   }
 
@@ -167,7 +199,7 @@ createForm.addEventListener("submit", async (event) => {
   try {
     const created = await apiFetch("/api/accounts", {
       method: "POST",
-      body: { employee_username: username, employee_email: email },
+      body: { employee_username: username, employee_email: email, ...(workStart ? { work_start: workStart, work_end: workEnd } : {}) },
     });
     closeCreateModal();
     showCreated(created);
@@ -180,3 +212,14 @@ createForm.addEventListener("submit", async (event) => {
 });
 
 loadAccounts();
+
+// Keep the Status and Last Seen columns live.
+setInterval(() => {
+  if (!document.hidden) loadAccounts({ silent: true });
+}, STATUS_REFRESH_MS);
+// A new anomaly may have locked a computer (js/anomaly-alerts.js): look again now
+// and a few seconds later, since the lock is stored just after the event.
+window.addEventListener("anomaly-detected", () => {
+  loadAccounts({ silent: true });
+  setTimeout(() => loadAccounts({ silent: true }), 4000);
+});

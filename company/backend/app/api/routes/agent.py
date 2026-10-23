@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.endpoint import Endpoint
+from app.models.removed_endpoint import RemovedEndpoint
 from app.services import endpoint_lock, screens
 
 # Called by the screen agent running on monitored computers, not by the
@@ -21,16 +22,31 @@ def _authenticated_endpoint(token: str, db: Session) -> Endpoint:
     return endpoint
 
 
+def _was_removed(token: str, db: Session) -> bool:
+    """Whether the token is genuinely that of a computer whose employee has been
+    deleted (it is derived from ids that only the server and that computer know)."""
+    endpoint_id = screens.token_endpoint_id(token)
+    removed = db.get(RemovedEndpoint, endpoint_id) if endpoint_id is not None else None
+    return removed is not None and screens.token_matches(token, removed.id, removed.wazuh_agent_id)
+
+
 @router.get("/status")
 def status(
     token: str = Header(alias="X-AegisGuard-Token"),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Polled by the screen agent every few seconds: whether this computer is
-    locked. The state is the employee account's, set in the portal or by a
-    Critical event, so the computer can't unlock itself."""
-    endpoint = _authenticated_endpoint(token, db)
-    return {"locked": endpoint_lock.is_locked(endpoint.employee)}
+    """Polled by the screen agent every few seconds, and every few minutes by
+    the removal check running as SYSTEM: whether this computer is locked (the
+    employee account's state, set in the portal or by a Critical event, so the
+    computer can't unlock itself), and whether it is to uninstall AegisGuard,
+    which is only said for a computer whose employee was deleted."""
+    endpoint_id = screens.token_endpoint_id(token)
+    endpoint = db.get(Endpoint, endpoint_id) if endpoint_id is not None else None
+    if endpoint is not None and screens.token_matches(token, endpoint.id, endpoint.wazuh_agent_id):
+        return {"locked": endpoint_lock.is_locked(endpoint.employee), "uninstall": False}
+    if _was_removed(token, db):
+        return {"locked": False, "uninstall": True}
+    raise HTTPException(status_code=401, detail="Invalid endpoint token")
 
 
 @router.post("/maintenance")

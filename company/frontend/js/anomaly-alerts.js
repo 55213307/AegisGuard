@@ -18,6 +18,9 @@
   const MAX_AGE_MS = 10 * 60 * 1000; // never alert about anomalies older than this
   const MAX_TOASTS = 4;
   const TOAST_MS = 60 * 1000;
+  // A computer that keeps producing anomalies pops up once per this long (per severity), not once per event.
+  const COOLDOWN_MS = 5 * 60 * 1000;
+  const lastAlertAt = new Map();
 
   function store(key, value) {
     try {
@@ -120,20 +123,19 @@
     while (host.children.length >= MAX_TOASTS) host.firstElementChild.remove();
 
     const toast = document.createElement("div");
-    toast.className = "anomaly-toast" + (alert.severity === "Critical" ? " anomaly-toast-critical" : "");
+    toast.className = "anomaly-toast";
+    toast.dataset.severity = alert.severity === "Critical" ? "critical" : "warning";
     toast.setAttribute("role", "alert");
     const needsHint = !isMuted() && !audioRunning();
     toast.innerHTML = `
-      <div class="anomaly-toast-icon" aria-hidden="true">!</div>
+      <span class="anomaly-toast-dot" aria-hidden="true"></span>
       <div class="anomaly-toast-body">
-        <p class="anomaly-toast-title">Behavior anomaly detected <span class="badge badge-danger">${alert.risk_score}</span></p>
-        <p class="anomaly-toast-endpoint">${escapeHtml(alert.endpoint_name)}</p>
-        <p class="anomaly-toast-reason">${escapeHtml(alert.risk_reason || alert.description || "Unusual activity")}</p>
-        ${needsHint ? `<p class="anomaly-toast-hint">Click anywhere on the page to enable the alert sound.</p>` : ""}
+        <p class="anomaly-toast-title">${escapeHtml(alert.risk_reason || alert.description || "Unusual activity")}</p>
+        <p class="anomaly-toast-meta">${escapeHtml(alert.endpoint_name)} &middot; ${escapeHtml(alert.severity)} &middot; risk ${alert.risk_score}</p>
+        ${needsHint ? `<p class="anomaly-toast-meta anomaly-toast-hint">Click the page to turn on sound.</p>` : ""}
         <div class="anomaly-toast-actions">
-          <a class="anomaly-toast-link" href="live-monitoring.html">Live Monitoring</a>
-          <a class="anomaly-toast-link" href="security-logs.html">Security Logs</a>
-          <button type="button" class="anomaly-toast-mute">${isMuted() ? "Unmute sound" : "Mute sound"}</button>
+          <a href="live-monitoring.html">View</a>
+          <button type="button" class="anomaly-toast-mute">${isMuted() ? "Unmute" : "Mute"}</button>
         </div>
       </div>
       <button type="button" class="anomaly-toast-close" aria-label="Dismiss">&times;</button>`;
@@ -141,7 +143,7 @@
     toast.querySelector(".anomaly-toast-close").addEventListener("click", () => toast.remove());
     toast.querySelector(".anomaly-toast-mute").addEventListener("click", (event) => {
       store(MUTE_KEY, isMuted() ? "0" : "1");
-      event.target.textContent = isMuted() ? "Unmute sound" : "Mute sound";
+      event.target.textContent = isMuted() ? "Unmute" : "Mute";
     });
     host.appendChild(toast);
     setTimeout(() => toast.remove(), TOAST_MS);
@@ -156,9 +158,18 @@
       store(CURSOR_KEY, String(Math.max(data.latest_id, cursor || 0)));
 
       const fresh = data.items.filter((a) => Date.now() - new Date(a.event_time).getTime() < MAX_AGE_MS);
-      if (fresh.length) {
-        fresh.forEach(showToast);
+      // Limited per computer and severity: a Critical after a stream of Warnings still shows at once.
+      const toShow = fresh.filter((a) => {
+        const key = `${a.endpoint_name}|${a.severity}`;
+        if (Date.now() - (lastAlertAt.get(key) || 0) < COOLDOWN_MS) return false;
+        lastAlertAt.set(key, Date.now());
+        return true;
+      });
+      if (toShow.length) {
+        toShow.forEach(showToast);
         soundAlarm();
+      }
+      if (fresh.length) {
         window.dispatchEvent(new CustomEvent("anomaly-detected", { detail: fresh }));
       }
     } catch (err) {

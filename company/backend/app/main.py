@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import agent, anomalies, auth, dashboard, employees, security_logs
 from app.core.config import settings
-from app.services import ingest
+from app.services import health, ingest
 from app.services.ml import registry as ml_registry
 
 # uvicorn only sets up logging for its own loggers, so without this the
@@ -32,6 +32,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AegisGuard Company Portal API", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def track_server_errors(request: Request, call_next):
+    # Unhandled errors in API routes end as a 500 and nothing else notices them;
+    # the dashboard's Platform Service Status shows them (services/health.py).
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        if request.url.path.startswith("/api/"):
+            health.fail("api", f"{request.method} {request.url.path}: {type(exc).__name__}")
+        raise
+    if response.status_code >= 500 and request.url.path.startswith("/api/"):
+        health.fail("api", f"{request.method} {request.url.path} answered {response.status_code}")
+    return response
 
 
 @app.middleware("http")

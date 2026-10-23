@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     # Until an endpoint has this much real history the baseline file is
     # trained on together with whatever real events exist; after it, real only.
     ml_min_real_actions: int = 2000
+    # The automatic baseline assumes a working pattern (ml_default_shift), so it
+    # is only a prior: it starts at this many rows and fades out as the
+    # endpoint's own activity accumulates (gone by ml_min_real_actions).
+    ml_prior_rows: int = 3000
+    # Until an endpoint with an automatic baseline has this many real actions,
+    # the hour and weekday of its events aren't judged: its working hours aren't
+    # known yet, and the assumed ones must not be held against anyone.
+    ml_time_trust_actions: int = 600
+    # While an endpoint is still learning, retrain this often so the model
+    # follows the data as it arrives.
+    ml_learning_retrain_hours: float = 6.0
     ml_min_real_days: int = 14
     # Leave out real events the current model already flags as anomalous, so
     # an attack never becomes part of "normal".

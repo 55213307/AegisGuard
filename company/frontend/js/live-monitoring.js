@@ -60,8 +60,8 @@ function renderGrid() {
           <span class="badge ${style.badge}">${escapeHtml(account.endpoint_status)}</span>
         </div>
         <p class="endpoint-card-user">Last seen: ${timeAgo(account.last_seen_time)}</p>
-        ${locked ? `<span class="endpoint-card-flag" title="${escapeHtml(account.lock_reason || "")}">&#128274; LOCKED${account.lock_reason ? ` &middot; ${escapeHtml(account.lock_reason)}` : ""}</span>` : ""}
-        ${alerting ? `<span class="endpoint-card-flag">&#9888; Anomaly detected &middot; ${account.risk_active}</span>` : ""}
+        ${locked ? `<span class="endpoint-card-flag" title="${escapeHtml(account.lock_reason || "")}">Locked${account.lock_reason ? ` &middot; ${escapeHtml(account.lock_reason)}` : ""}</span>` : ""}
+        ${alerting ? `<span class="endpoint-card-flag">Anomaly detected &middot; ${account.risk_active}</span>` : ""}
       </div>
     `;
     card.addEventListener("click", () => EndpointDetail.open(account, { onChanged: loadEndpoints }));

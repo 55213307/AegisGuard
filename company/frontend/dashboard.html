@@ -104,28 +104,37 @@
         <div class="panel panel-grow">
           <div class="panel-header">
             <h2 class="panel-title font-tech">Platform Service Status</h2>
-            <a class="panel-link" href="#">View Details &rarr;</a>
           </div>
           <div class="service-grid" id="serviceGrid">
-            <div class="service-card">
+            <div class="service-card" data-service="api_server" data-status="unknown">
               <span class="service-dot" data-status="unknown"></span>
               <p class="service-name">API Server</p>
               <p class="service-state">--</p>
+              <p class="service-detail"></p>
             </div>
-            <div class="service-card">
+            <div class="service-card" data-service="database" data-status="unknown">
               <span class="service-dot" data-status="unknown"></span>
               <p class="service-name">Database</p>
               <p class="service-state">--</p>
+              <p class="service-detail"></p>
             </div>
-            <div class="service-card">
+            <div class="service-card" data-service="wazuh_manager" data-status="unknown">
               <span class="service-dot" data-status="unknown"></span>
               <p class="service-name">Wazuh Manager</p>
               <p class="service-state">--</p>
+              <p class="service-detail"></p>
             </div>
-            <div class="service-card">
+            <div class="service-card" data-service="ingestion" data-status="unknown">
               <span class="service-dot" data-status="unknown"></span>
               <p class="service-name">Event Ingestion</p>
               <p class="service-state">--</p>
+              <p class="service-detail"></p>
+            </div>
+            <div class="service-card" data-service="behavior_model" data-status="unknown">
+              <span class="service-dot" data-status="unknown"></span>
+              <p class="service-name">Behavior Model</p>
+              <p class="service-state">--</p>
+              <p class="service-detail"></p>
             </div>
           </div>
         </div>

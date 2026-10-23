@@ -114,7 +114,7 @@
 
 .service-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 12px;
 }
 
@@ -158,6 +158,43 @@
   font-size: 12px;
   letter-spacing: 0.1px;
   color: var(--text-muted);
+}
+
+/* A service with a problem stands out: coloured border and label, and what is wrong underneath. */
+.service-card[data-status="warn"] {
+  border-color: var(--warning-text);
+}
+
+.service-card[data-status="down"] {
+  border-color: var(--danger-text);
+}
+
+.service-card[data-status="ok"] .service-state {
+  color: var(--success-text);
+}
+
+.service-card[data-status="warn"] .service-state {
+  color: var(--warning-text);
+}
+
+.service-card[data-status="down"] .service-state {
+  color: var(--danger-text);
+}
+
+.service-detail {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.service-detail:empty {
+  display: none;
 }
 
 .alert-list {
@@ -217,6 +254,12 @@
 .alert-item > .badge {
   min-width: 40px;
   flex: 0 0 auto;
+}
+
+@media (max-width: 1500px) {
+  .service-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 @media (max-width: 1300px) {

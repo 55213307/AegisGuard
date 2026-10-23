@@ -76,6 +76,14 @@ def get_agents_info(agent_ids: list[str]) -> dict[str, dict]:
 _AGENT_NOT_FOUND = 1701
 
 
+def manager_daemons() -> dict[str, str]:
+    """Status of the manager's daemons by name ("running" / "stopped" / ...).
+    Being able to log in to the API says little: the API can answer while the
+    daemon that agents connect to (wazuh-remoted) is stuck or down."""
+    body = _request("GET", "/manager/status")
+    return dict(body["data"]["affected_items"][0])
+
+
 def delete_agent(agent_id: str) -> None:
     """Removes the agent so its key stops working immediately.
 

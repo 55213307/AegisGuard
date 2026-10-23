@@ -19,7 +19,7 @@ from app.db.session import SessionLocal
 from app.models.endpoint import Endpoint
 from app.models.security_event import SecurityEvent
 from app.services.alerts import agent_id_of, parse_alert
-from app.services import endpoint_lock
+from app.services import endpoint_lock, health, overtime
 from app.services.ml import registry, scoring
 
 log = logging.getLogger("aegisguard.ingest")
@@ -93,9 +93,17 @@ def _store(db, lines: list[bytes], agents: dict[str, tuple[int, int]]) -> int:
     # While an installer is working on a computer its events aren't judged.
     judged = _outside_maintenance(rows, endpoint_lock.maintenance_windows(db, {r["endpoint_id"] for r in rows}))
     try:
-        scoring.apply(judged, registry.get_model, scoring.failed_logon_counter(db, judged))
+        scoring.apply(
+            judged,
+            registry.get_model,
+            scoring.failed_logon_counter(db, judged),
+            overtime.windows(db, {r["endpoint_id"] for r in judged}),
+            # Endpoints whose working hours the model hasn't learned yet aren't judged on the hour.
+            {r["endpoint_id"] for r in judged if registry.time_trusted(r["endpoint_id"]) is False},
+        )
     except Exception:  # a scoring problem must never cost us the alerts themselves
         log.exception("Scoring new events failed; storing them unscored")
+        health.fail("ingestion", "Scoring new events failed; they were stored without a risk score")
         for row in judged:
             row.setdefault("risk_score", None)
             row.setdefault("risk_reason", None)
@@ -114,6 +122,7 @@ def _store(db, lines: list[bytes], agents: dict[str, tuple[int, int]]) -> int:
     except Exception:
         db.rollback()
         log.exception("Automatic locking after new events failed")
+        health.fail("ingestion", "Automatic locking after new events failed")
     return len(stored_ids)
 
 
@@ -139,9 +148,15 @@ def _run() -> None:
                             log.info("Ingested %d new security event(s).", inserted)
                     finally:
                         db.close()
-        except Exception:  # never let one bad cycle kill the thread
+            health.ok("ingestion")
+        except Exception as exc:  # never let one bad cycle kill the thread
             log.exception("Alert ingestion cycle failed")
+            health.fail("ingestion", f"Ingestion cycle failed: {exc}")
         _stop.wait(settings.ingest_poll_seconds)
+
+
+def is_running() -> bool:
+    return _thread is not None and _thread.is_alive()
 
 
 def start() -> None:

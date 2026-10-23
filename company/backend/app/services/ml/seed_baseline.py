@@ -65,6 +65,24 @@ class Shift:
     overnight: bool  # runs past midnight, so early-morning times are the next day
 
 
+def shift_from_hours(start: str, end: str) -> Shift:
+    """The shift a company declared as "HH:MM" start and end times. An end
+    before the start means it runs past midnight. The break falls in the middle
+    of the day, and is shorter for a short day."""
+    (sh, sm), (eh, em) = (map(int, start.split(":")), map(int, end.split(":")))
+    first, last = sh * 60 + sm, eh * 60 + em
+    length = (last - first) % (24 * 60)
+    middle = (first + length // 2) % (24 * 60)
+    return Shift(
+        "declared",
+        signin=start,
+        break_at=f"{middle // 60:02d}:{middle % 60:02d}",
+        break_minutes=(30, 60) if length >= 360 else (10, 20),
+        signout=end,
+        overnight=last <= first,
+    )
+
+
 NIGHT = Shift("night", signin="22:00", break_at="01:40", break_minutes=(20, 35), signout="06:00", overnight=True)
 DAY = Shift("day", signin="09:00", break_at="12:30", break_minutes=(45, 70), signout="18:00", overnight=False)
 SHIFTS = {s.name: s for s in (NIGHT, DAY)}

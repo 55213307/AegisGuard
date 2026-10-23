@@ -74,11 +74,10 @@
   }
 }
 
-/* A computer with an active behavior anomaly (last 15 minutes). */
+/* A computer with an active behavior anomaly (last 15 minutes): a plain red border. */
 .endpoint-card-alert {
   border-color: var(--danger-text);
-  box-shadow: 0 0 0 1px var(--danger-text), 0 0 16px rgba(251, 113, 133, 0.35);
-  animation: endpoint-alert-pulse 1.4s ease-in-out infinite;
+  box-shadow: 0 0 0 1px var(--danger-text);
 }
 
 .endpoint-card-flag {
@@ -90,18 +89,6 @@
   font-weight: 600;
   background: var(--danger-bg);
   color: var(--danger-text);
-}
-
-@keyframes endpoint-alert-pulse {
-  50% {
-    box-shadow: 0 0 0 2px var(--danger-text), 0 0 30px rgba(251, 113, 133, 0.65);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .endpoint-card-alert {
-    animation: none;
-  }
 }
 
 /* A locked computer: solid red, no pulse, dimmed screen. */

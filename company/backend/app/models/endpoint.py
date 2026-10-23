@@ -28,5 +28,7 @@ class Endpoint(Base):
     # While an installer is working on the computer (it tells the portal when it
     # starts), events up to this time aren't scored and can't lock the computer.
     maintenance_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When that window started (the portal shows both ends).
+    maintenance_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     employee: Mapped["Employee"] = relationship(back_populates="endpoint")  # noqa: F821

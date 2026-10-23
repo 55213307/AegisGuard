@@ -19,8 +19,9 @@ class TimelinePoint(BaseModel):
 
 
 class ServiceStatus(BaseModel):
-    status: str  # ok / warn / down
+    status: str  # ok / warn / down / unknown
     label: str
+    detail: str | None = None  # what is wrong (or a useful fact when nothing is)
 
 
 class RecentAlert(BaseModel):

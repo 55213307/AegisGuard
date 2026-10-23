@@ -10,14 +10,18 @@ from app.api.deps import Principal, require_password_changed
 from app.db.session import get_db
 from app.models.employee import Employee, EmployeeStatus
 from app.models.endpoint import Endpoint
+from app.models.removed_endpoint import RemovedEndpoint
 from app.models.security_event import SecurityEvent
 from app.schemas.employee import (
     EmployeeCreate,
     EmployeeListResponse,
     EmployeeOut,
+    OvertimeRequest,
+    WorkHoursRequest,
     SecurityEventListResponse,
 )
-from app.services import endpoint_lock, screens, wazuh
+from app.services import endpoint_lock, overtime, screens, wazuh
+from app.services.ml import registry
 from app.services.ml.model import ANOMALY_RISK_THRESHOLD, EXPLAIN_RISK_FROM
 from app.services.installer import build_installer
 
@@ -97,6 +101,13 @@ def _risk_24h(db: Session, employees: list[Employee]) -> dict[int, tuple[int | N
     return {endpoint_id: (day, recent) for endpoint_id, day, recent in rows}
 
 
+def _learning(endpoint) -> dict:
+    progress = registry.learning_progress(endpoint.id) if endpoint else None
+    if progress is None:
+        return {}
+    return {"learning_state": progress["state"], "learning_actions": progress["actions"], "learning_needed": progress["needed"]}
+
+
 def _to_out(
     employee: Employee,
     agents_info: dict[str, dict] | None,
@@ -130,6 +141,12 @@ def _to_out(
         last_seen_time=_parse_time(info.get("lastKeepAlive")),
         lock_reason=employee.lock_reason,
         locked_at=employee.locked_at,
+        overtime_until=employee.overtime_until if overtime.is_active(employee) else None,
+        work_start=employee.work_start,
+        work_end=employee.work_end,
+        maintenance_from=endpoint.maintenance_from if endpoint else None,
+        maintenance_until=endpoint.maintenance_until if endpoint else None,
+        **_learning(endpoint),
         risk_24h=day_risk,
         risk_active=recent_risk if recent_risk is not None and recent_risk >= ANOMALY_RISK_THRESHOLD else None,
     )
@@ -177,6 +194,8 @@ def create_employee(
         employee_username=payload.employee_username,
         employee_email=payload.employee_email,
         employee_status=EmployeeStatus.ACTIVE,
+        work_start=payload.work_start,
+        work_end=payload.work_end,
     )
     db.add(employee)
     db.commit()
@@ -198,6 +217,59 @@ def lock_employee(
 ) -> EmployeeOut:
     employee = _get_employee_or_404(employee_id, principal, db)
     endpoint_lock.lock(db, employee, "Locked by administrator", principal.company_name)
+    return _to_out(employee, _agents_info([employee]))
+
+
+@router.post("/{employee_id}/overtime", response_model=EmployeeOut)
+def allow_overtime(
+    employee_id: int,
+    payload: OvertimeRequest,
+    principal: Principal = Depends(require_password_changed),
+    db: Session = Depends(get_db),
+) -> EmployeeOut:
+    """Approve overtime for a while: the hour and weekday of this computer's
+    activity aren't held against it while the window is open."""
+    employee = _get_employee_or_404(employee_id, principal, db)
+    overtime.allow(db, employee, payload.minutes, principal.company_name)
+    return _to_out(employee, _agents_info([employee]))
+
+
+@router.delete("/{employee_id}/overtime", response_model=EmployeeOut)
+def end_overtime(
+    employee_id: int, principal: Principal = Depends(require_password_changed), db: Session = Depends(get_db)
+) -> EmployeeOut:
+    employee = _get_employee_or_404(employee_id, principal, db)
+    overtime.end(db, employee, principal.company_name)
+    return _to_out(employee, _agents_info([employee]))
+
+
+@router.put("/{employee_id}/work-hours", response_model=EmployeeOut)
+def set_work_hours(
+    employee_id: int,
+    payload: WorkHoursRequest,
+    principal: Principal = Depends(require_password_changed),
+    db: Session = Depends(get_db),
+) -> EmployeeOut:
+    """Declare the employee's working hours. The behavioral model starts from
+    them and is retrained at once, so it learns the new hours straight away."""
+    employee = _get_employee_or_404(employee_id, principal, db)
+    employee.work_start, employee.work_end = payload.start, payload.end
+    db.commit()
+    if employee.endpoint is not None:
+        registry.retrain_soon(employee.endpoint.id)
+    return _to_out(employee, _agents_info([employee]))
+
+
+@router.delete("/{employee_id}/work-hours", response_model=EmployeeOut)
+def clear_work_hours(
+    employee_id: int, principal: Principal = Depends(require_password_changed), db: Session = Depends(get_db)
+) -> EmployeeOut:
+    """Go back to learning the working hours from the computer's own activity."""
+    employee = _get_employee_or_404(employee_id, principal, db)
+    employee.work_start = employee.work_end = None
+    db.commit()
+    if employee.endpoint is not None:
+        registry.retrain_soon(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
 
 
@@ -346,5 +418,18 @@ def delete_employee(
             )
             raise HTTPException(status_code=503, detail=ENDPOINT_SERVICE_DOWN) from exc
         screens.forget(employee.endpoint.id)
+        # Remember the computer, so the software still on it can be told to
+        # uninstall itself (see agent.py status); forgotten after a year.
+        db.merge(
+            RemovedEndpoint(
+                id=employee.endpoint.id,
+                unique_id=employee.unique_id,
+                wazuh_agent_id=employee.endpoint.wazuh_agent_id,
+                endpoint_name=employee.endpoint.endpoint_name,
+            )
+        )
+        db.query(RemovedEndpoint).filter(
+            RemovedEndpoint.removed_time < datetime.now(timezone.utc) - timedelta(days=365)
+        ).delete(synchronize_session=False)
     db.delete(employee)
     db.commit()

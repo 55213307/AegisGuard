@@ -36,6 +36,11 @@ class Employee(Base):
     # Why and since when the account (and so the employee's computer) is locked.
     lock_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # While an administrator has approved overtime (see services/overtime.py).
+    overtime_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Working hours the company declared ("HH:MM", local time); both None = learn them.
+    work_start: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    work_end: Mapped[str | None] = mapped_column(String(5), nullable=True)
 
     company: Mapped["Customer"] = relationship()  # noqa: F821
     # cascade + passive_deletes so deleting an employee deletes its endpoint

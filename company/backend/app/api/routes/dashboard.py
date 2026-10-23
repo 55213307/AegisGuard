@@ -15,7 +15,7 @@ from app.schemas.dashboard import (
     ServiceStatus,
     TimelinePoint,
 )
-from app.services import wazuh
+from app.services import platform_status, wazuh
 from app.services.ml.model import ANOMALY_RISK_THRESHOLD
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -46,7 +46,6 @@ def dashboard(
     # Online/offline from Wazuh. If the manager is unreachable, we still render
     # the rest of the dashboard and flag the service below.
     online = offline = 0
-    wazuh_ok = True
     agent_ids = [e.wazuh_agent_id for e in endpoints]
     try:
         info = wazuh.get_agents_info(agent_ids) if agent_ids else {}
@@ -56,7 +55,7 @@ def dashboard(
             else:
                 offline += 1
     except wazuh.WazuhError:
-        wazuh_ok = False
+        pass  # shown by the Wazuh Manager service below; the counts stay zero
 
     # Alerts per day, last 7 days (DB date() uses the session timezone, so the
     # buckets match the timestamps the user sees).
@@ -111,19 +110,14 @@ def dashboard(
     ]
 
     last_event_time = recent[0].event_time if recent else None
-    ingestion_active = last_event_time is not None and last_event_time >= now - timedelta(hours=1)
 
+    # Each service is checked now, not assumed (see services/platform_status.py).
     services = {
-        "api_server": ServiceStatus(status="ok", label="Operational"),
-        "database": ServiceStatus(status="ok", label="Operational"),
-        "wazuh_manager": ServiceStatus(
-            status="ok" if wazuh_ok else "warn",
-            label="Connected" if wazuh_ok else "Unreachable",
-        ),
-        "ingestion": ServiceStatus(
-            status="ok" if ingestion_active else "warn",
-            label="Active" if ingestion_active else "No recent events",
-        ),
+        "api_server": platform_status.api_server(now),
+        "database": platform_status.database(db),
+        "wazuh_manager": platform_status.wazuh_manager(),
+        "ingestion": platform_status.ingestion(last_event_time, now),
+        "behavior_model": platform_status.behavior_model([(e.id, e.created_time) for e in endpoints], now),
     }
 
     return DashboardResponse(
@@ -134,7 +128,7 @@ def dashboard(
             events_24h=events_24h,
             critical_24h=critical_24h,
             anomalies_24h=anomalies_24h,
-            platform_status="Operational" if wazuh_ok else "Degraded",
+            platform_status=platform_status.overall(services),
         ),
         severity_7d=severity_7d,
         timeline_7d=timeline,

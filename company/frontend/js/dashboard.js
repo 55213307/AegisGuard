@@ -157,14 +157,37 @@ function renderSeverityDonut(severity, animate = false) {
   host.appendChild(legend);
 }
 
+function setService(card, service) {
+  card.dataset.status = service.status;
+  card.querySelector(".service-dot").dataset.status = service.status;
+  card.querySelector(".service-state").textContent = service.label;
+  card.querySelector(".service-detail").textContent = service.detail || "";
+  card.title = service.detail || "";
+}
+
 function renderServices(services) {
-  const order = ["api_server", "database", "wazuh_manager", "ingestion"];
-  document.querySelectorAll("#serviceGrid .service-card").forEach((card, i) => {
-    const s = services[order[i]];
-    if (!s) return;
-    card.querySelector(".service-dot").dataset.status = s.status;
-    card.querySelector(".service-state").textContent = s.label;
+  document.querySelectorAll("#serviceGrid .service-card").forEach((card) => {
+    setService(card, services[card.dataset.service] || { status: "unknown", label: "--", detail: "" });
   });
+}
+
+// The dashboard request itself failed, so none of the checks could run: say so here
+// rather than leaving the last good state on screen.
+function renderServicesUnavailable(err) {
+  const noAnswer = (err && err.message || "").startsWith("Could not reach");
+  document.querySelectorAll("#serviceGrid .service-card").forEach((card) => {
+    if (card.dataset.service === "api_server") {
+      setService(card, {
+        status: "down",
+        label: noAnswer ? "Not responding" : "Error",
+        detail: err && err.message ? err.message : "The dashboard request failed",
+      });
+    } else {
+      setService(card, { status: "unknown", label: "Unknown", detail: "Could not be checked: the dashboard request failed" });
+    }
+  });
+  const platform = document.querySelector('[data-stat="platformStatus"]');
+  if (platform) platform.textContent = "Down";
 }
 
 function renderAlerts(alerts) {
@@ -226,6 +249,7 @@ async function loadDashboard() {
     animatedOnce = true;
   } catch (err) {
     console.error("Failed to load dashboard", err);
+    renderServicesUnavailable(err);
   }
 }
 

@@ -16,6 +16,10 @@ from app.core.config import settings
 INSTALL_DIR = r"C:\Program Files\AegisGuard"
 SCREEN_AGENT_PATH = INSTALL_DIR + r"\screen-agent.ps1"
 TASK_NAME = "AegisGuard Screen Agent"
+REMOVAL_TASK_NAME = "AegisGuard Removal Check"
+REMOVAL_AGENT_PATH = INSTALL_DIR + r"\remove-agent.ps1"
+# Longest piece of Base64 put on one line of the .cmd (cmd's limit is 8191 per line).
+_CMD_CHUNK = 6000
 
 # Runs in the signed-in user's session, hidden: uploads screenshots for Live
 # Monitoring and, while the employee account is Locked in the portal, covers
@@ -120,29 +124,65 @@ function Get-Locked {
     }
 }
 
+# What a locked computer shows: plain centred text on a dark background.
+function New-LockForm {
+    $form = New-Object System.Windows.Forms.Form
+    $form.FormBorderStyle = 'None'
+    $form.StartPosition = 'Manual'
+    $form.ShowInTaskbar = $false
+    $form.BackColor = [System.Drawing.Color]::FromArgb(11, 15, 26)
+
+    $layout = New-Object System.Windows.Forms.TableLayoutPanel
+    $layout.Dock = 'Fill'
+    $layout.ColumnCount = 1
+    $layout.RowCount = 4
+    [void]$layout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 50)))
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = 'This computer is locked'
+    $title.AutoSize = $true
+    $title.Anchor = 'None'
+    $title.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 26)
+    $title.ForeColor = [System.Drawing.Color]::FromArgb(241, 245, 249)
+    $title.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
+    $layout.Controls.Add($title, 0, 1)
+
+    $body = New-Object System.Windows.Forms.Label
+    $body.Text = 'Contact your administrator to unlock it.'
+    $body.AutoSize = $true
+    $body.Anchor = 'None'
+    $body.Font = New-Object System.Drawing.Font('Segoe UI', 13)
+    $body.ForeColor = [System.Drawing.Color]::FromArgb(148, 163, 184)
+    $layout.Controls.Add($body, 0, 2)
+
+    $footer = New-Object System.Windows.Forms.Label
+    $footer.Text = 'AegisGuard'
+    $footer.Dock = 'Bottom'
+    $footer.Height = 56
+    $footer.TextAlign = 'MiddleCenter'
+    $footer.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+    $footer.ForeColor = [System.Drawing.Color]::FromArgb(91, 100, 120)
+
+    $form.Controls.Add($layout)
+    $form.Controls.Add($footer)
+    return $form
+}
+
 # Full-screen lock with all input blocked. Blocks until the portal says the
 # computer is unlocked (polled in the background so the hooks never stall).
 function Show-Lock {
     Set-TaskManager $true
     $state = @{ Pending = $null; Unlocked = $false }
 
-    $form = New-Object System.Windows.Forms.Form
-    $form.FormBorderStyle = 'None'
-    $form.StartPosition = 'Manual'
-    $form.ShowInTaskbar = $false
+    $form = New-LockForm
     $form.TopMost = $true
-    $form.BackColor = [System.Drawing.Color]::FromArgb(20, 6, 10)
     $area = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $form.Location = New-Object System.Drawing.Point $area.Left, $area.Top
     $form.Size = New-Object System.Drawing.Size $area.Width, $area.Height
-
-    $title = New-Object System.Windows.Forms.Label
-    $title.Dock = 'Fill'
-    $title.TextAlign = 'MiddleCenter'
-    $title.ForeColor = [System.Drawing.Color]::FromArgb(251, 113, 133)
-    $title.Font = New-Object System.Drawing.Font 'Segoe UI', 30, ([System.Drawing.FontStyle]::Bold)
-    $title.Text = "THIS COMPUTER IS LOCKED`r`n`r`nYour administrator has locked this computer.`r`nContact your administrator to unlock it."
-    $form.Controls.Add($title)
 
     $form.Add_FormClosing({
         param($sender, $e)
@@ -243,7 +283,7 @@ while ($true) {
 # Windows language) at logon, then starts it for whoever is signed in now.
 _SETUP_SCREEN_AGENT = r"""$ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path '__INSTALL_DIR__' | Out-Null
-[IO.File]::WriteAllBytes('__AGENT_PATH__', [Convert]::FromBase64String($env:AG_SCREEN_AGENT))
+[IO.File]::WriteAllBytes('__AGENT_PATH__', [Convert]::FromBase64String(__AGENT_B64__))
 $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File "__AGENT_PATH__"'
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
@@ -256,6 +296,90 @@ Register-ScheduledTask -TaskName '__TASK_NAME__' -Action $action -Trigger $trigg
 Stop-ScheduledTask -TaskName '__TASK_NAME__' -ErrorAction SilentlyContinue
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*__AGENT_PATH__*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-ScheduledTask -TaskName '__TASK_NAME__'
+"""
+
+# Runs as SYSTEM on the endpoint (see the comments inside the script).
+_REMOVAL_AGENT = r"""# Runs as SYSTEM every few minutes (scheduled task). Asks the portal whether this
+# computer's employee account has been deleted, and only when the portal says so
+# explicitly, uninstalls AegisGuard. Being offline, a refused request or any
+# error does nothing at all: a missing connection is never a reason to remove it.
+$StatusUrl = '__STATUS_URL__'
+$Token = '__TOKEN__'
+$InstallDir = '__INSTALL_DIR__'
+$ScreenTask = '__TASK_NAME__'
+$RemovalTask = '__REMOVAL_TASK_NAME__'
+$DryRun = $false
+$Log = Join-Path $env:ProgramData 'AegisGuard-removal.log'
+
+function Step([string]$What, [scriptblock]$Do) {
+    Add-Content -Path $Log -Value ('[{0}] {1}' -f (Get-Date -Format s), $What)
+    if ($DryRun) { Write-Output ('DRY RUN: ' + $What); return }
+    try { & $Do } catch { Add-Content -Path $Log -Value ('    failed: ' + $_.Exception.Message) }
+}
+
+try {
+    $reply = Invoke-RestMethod -Uri $StatusUrl -Method Get -Headers @{ 'X-AegisGuard-Token' = $Token } -TimeoutSec 15
+} catch {
+    return
+}
+# Only a real boolean true counts, not a string that merely reads as one.
+if (($reply.uninstall -isnot [bool]) -or ($reply.uninstall -ne $true)) { return }
+
+Step 'stop the screen agent' {
+    Stop-ScheduledTask -TaskName $ScreenTask -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*$InstallDir*screen-agent.ps1*" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+Step 'remove the screen agent task' {
+    Unregister-ScheduledTask -TaskName $ScreenTask -Confirm:$false -ErrorAction SilentlyContinue
+}
+Step 'undo the lock settings left in the profiles of signed-in users' {
+    Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^S-1-5-21-[\d-]+$' } | ForEach-Object {
+        Remove-ItemProperty -Path ('Registry::' + $_.Name + '\Software\Microsoft\Windows\CurrentVersion\Policies\System') -Name DisableTaskMgr -ErrorAction SilentlyContinue
+        Remove-Item -Path ('Registry::' + $_.Name + '\Software\AegisGuard') -Recurse -ErrorAction SilentlyContinue
+    }
+}
+Step 'stop and uninstall the Wazuh agent' {
+    Stop-Service -Name WazuhSvc -Force -ErrorAction SilentlyContinue
+    $roots = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    $app = Get-ItemProperty -Path $roots -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'Wazuh Agent*' } | Select-Object -First 1
+    if ($app -and $app.PSChildName -match '^\{') {
+        Start-Process -FilePath msiexec.exe -ArgumentList ('/x ' + $app.PSChildName + ' /qn /norestart') -Wait
+    } else {
+        sc.exe delete WazuhSvc | Out-Null
+    }
+}
+Step 'delete what the Wazuh agent left behind' {
+    Remove-Item -Path (Join-Path ${env:ProgramFiles(x86)} 'ossec-agent') -Recurse -Force -ErrorAction SilentlyContinue
+}
+Step 'remove the Windows Defender exclusion' {
+    Remove-MpPreference -ExclusionPath $InstallDir -ErrorAction SilentlyContinue
+}
+Step 'remove this check and the AegisGuard folder' {
+    Unregister-ScheduledTask -TaskName $RemovalTask -Confirm:$false -ErrorAction SilentlyContinue
+    # This very script is in that folder: delete it from another process once this one has ended.
+    Start-Process -FilePath cmd.exe -ArgumentList ('/c ping 127.0.0.1 -n 6 >nul & rd /s /q "' + $InstallDir + '"') -WindowStyle Hidden
+}
+"""
+
+# Runs once, elevated, from the installer: writes the removal check and registers
+# it as a SYSTEM task. Separate from the screen agent setup so it can fail alone.
+_SETUP_REMOVAL_CHECK = r"""$ErrorActionPreference = 'Stop'
+# Best effort: monitoring works without this, so a failure here only warns.
+try {
+    [IO.File]::WriteAllBytes('__REMOVAL_PATH__', [Convert]::FromBase64String(__REMOVAL_B64__))
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "__REMOVAL_PATH__"'
+    $triggers = @(
+        (New-ScheduledTaskTrigger -AtStartup),
+        (New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(2)) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650))
+    )
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName '__REMOVAL_TASK_NAME__' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Force | Out-Null
+} catch {
+    Write-Warning ('Automatic removal support could not be set up: ' + $_.Exception.Message)
+}
 """
 
 _TEMPLATE = r"""@echo off
@@ -284,6 +408,8 @@ echo.
 echo  Once installed, the company's security team will be able to:
 echo    - collect security events and system logs from this computer
 echo    - view this computer's screen in real time
+echo    - remove AegisGuard from this computer again (it uninstalls
+echo      itself when this employee account is deleted)
 echo.
 echo  Monitoring follows your organisation's IT and privacy policy.
 echo  Continue only if the user of this computer has been informed.
@@ -309,7 +435,8 @@ powershell -NoProfile -Command "try {{ Invoke-RestMethod -Uri $env:AG_MAINT_URL 
 set "MANAGER={manager}"
 set "MSI_URL={msi_url}"
 set "AGENT_KEY_LINE={key_line}"
-set "AG_SCREEN_AGENT={screen_agent_b64}"
+{screen_agent_set_lines}
+{removal_agent_set_lines}
 set "MSI=%TEMP%\aegisguard-wazuh-agent.msi"
 set "AGENT_DIR=%ProgramFiles(x86)%\ossec-agent"
 
@@ -332,6 +459,8 @@ rem 1638 = this version is already installed; the key below still updates it.
 if %errorlevel% neq 0 if %errorlevel% neq 1638 goto fail
 
 :configure
+rem Renew the window: the download may have taken a while.
+powershell -NoProfile -Command "try {{ Invoke-RestMethod -Uri $env:AG_MAINT_URL -Method Post -Headers @{{'X-AegisGuard-Token'=$env:AG_TOKEN}} -TimeoutSec 10 | Out-Null }} catch {{}}"
 echo [3/6] Registering this computer with AegisGuard...
 net stop WazuhSvc >nul 2>&1
 powershell -NoProfile -Command "[IO.File]::WriteAllText($env:AGENT_DIR + '\client.keys', $env:AGENT_KEY_LINE + [char]10)"
@@ -358,6 +487,8 @@ rem If Windows Tamper Protection refuses, the manual steps are shown at the end.
 powershell -NoProfile -Command "try {{ Add-MpPreference -ExclusionPath '{install_dir}' }} catch {{}}" >nul 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {setup_encoded}
 if %errorlevel% neq 0 goto fail
+rem Lets the company remove AegisGuard again when it deletes this account. Best effort.
+powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {removal_setup_encoded}
 
 del "%MSI%" >nul 2>&1
 echo.
@@ -405,13 +536,40 @@ def _comment_safe(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9 ._@()-]", "?", text)
 
 
+def _env_chunks(prefix: str, text: str) -> tuple[str, str]:
+    """cmd.exe refuses batch lines longer than 8191 characters (it aborts the
+    whole script), so a script's Base64 is spread over several environment
+    variables, PREFIX_00, PREFIX_01, ... Returns the `set` lines for the .cmd
+    and the PowerShell expression that joins them back together."""
+    b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    chunks = [b64[i : i + _CMD_CHUNK] for i in range(0, len(b64), _CMD_CHUNK)]
+    set_lines = "\n".join(f'set "{prefix}_{i:02d}={chunk}"' for i, chunk in enumerate(chunks))
+    expr = "(" + " + ".join(f"$env:{prefix}_{i:02d}" for i in range(len(chunks))) + ")"
+    return set_lines, expr
+
+
 def build_installer(company: str, employee: str, key_line: str, screen_token: str) -> bytes:
-    upload_url = settings.portal_public_url.rstrip("/") + "/api/agent/screen"
-    screen_agent = _SCREEN_AGENT.replace("__UPLOAD_URL__", upload_url).replace("__TOKEN__", screen_token)
+    portal = settings.portal_public_url.rstrip("/")
+    screen_agent = _SCREEN_AGENT.replace("__UPLOAD_URL__", portal + "/api/agent/screen").replace("__TOKEN__", screen_token)
+    removal_agent = (
+        _REMOVAL_AGENT.replace("__STATUS_URL__", portal + "/api/agent/status")
+        .replace("__TOKEN__", screen_token)
+        .replace("__INSTALL_DIR__", INSTALL_DIR)
+        .replace("__TASK_NAME__", TASK_NAME)
+        .replace("__REMOVAL_TASK_NAME__", REMOVAL_TASK_NAME)
+    )
+    agent_set_lines, agent_b64_expr = _env_chunks("AG_SCREEN_AGENT", screen_agent)
+    removal_set_lines, removal_b64_expr = _env_chunks("AG_REMOVAL_AGENT", removal_agent)
     setup = (
         _SETUP_SCREEN_AGENT.replace("__INSTALL_DIR__", INSTALL_DIR)
+        .replace("__AGENT_B64__", agent_b64_expr)
         .replace("__AGENT_PATH__", SCREEN_AGENT_PATH)
         .replace("__TASK_NAME__", TASK_NAME)
+    )
+    removal_setup = (
+        _SETUP_REMOVAL_CHECK.replace("__REMOVAL_B64__", removal_b64_expr)
+        .replace("__REMOVAL_PATH__", REMOVAL_AGENT_PATH)
+        .replace("__REMOVAL_TASK_NAME__", REMOVAL_TASK_NAME)
     )
     script = _TEMPLATE.format(
         company=_comment_safe(company),
@@ -419,13 +577,15 @@ def build_installer(company: str, employee: str, key_line: str, screen_token: st
         manager=settings.wazuh_manager_address,
         msi_url=settings.wazuh_agent_msi_url,
         key_line=key_line,
-        maintenance_url=settings.portal_public_url.rstrip("/") + "/api/agent/maintenance",
+        maintenance_url=portal + "/api/agent/maintenance",
         screen_token=screen_token,
         install_dir=INSTALL_DIR,
         task_name=TASK_NAME,
         # Base64 keeps the multi-line scripts out of cmd.exe's quoting rules.
-        screen_agent_b64=base64.b64encode(screen_agent.encode("utf-8")).decode("ascii"),
+        screen_agent_set_lines=agent_set_lines,
+        removal_agent_set_lines=removal_set_lines,
         setup_encoded=base64.b64encode(setup.encode("utf-16-le")).decode("ascii"),
+        removal_setup_encoded=base64.b64encode(removal_setup.encode("utf-16-le")).decode("ascii"),
     )
     # cmd.exe expects CRLF line endings.
     return script.replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii")

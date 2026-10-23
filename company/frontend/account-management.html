@@ -99,6 +99,16 @@
         <input class="form-input" type="email" id="newEmail" name="email" placeholder="name@corp.com" required />
       </div>
 
+      <div class="form-field">
+        <span class="form-label">Working Hours <span class="form-optional">(optional)</span></span>
+        <div class="form-time-row">
+          <input class="form-input" type="time" id="newWorkStart" name="work_start" aria-label="Start of the working day" />
+          <span class="form-time-to">to</span>
+          <input class="form-input" type="time" id="newWorkEnd" name="work_end" aria-label="End of the working day" />
+        </div>
+        <p class="form-hint">Leave empty and AegisGuard learns them from the computer's activity. An end earlier than the start means the shift runs past midnight.</p>
+      </div>
+
       <p class="modal-helper modal-helper-flush">After the account is created, download the installer and run it on this employee's computer to start monitoring it.</p>
 
       <p class="form-error" id="createAccountError"></p>
@@ -144,6 +154,7 @@
           <span class="badge" id="detailStatusBadge"></span>
         </div>
         <div class="topbar-actions">
+          <button class="btn btn-ghost" type="button" id="detailOvertimeBtn">Allow Overtime</button>
           <button class="btn btn-ghost" type="button" id="detailLockBtn">Lock Computer</button>
           <button class="btn btn-ghost" type="button" id="detailRefreshBtn">Force Refresh</button>
           <button class="btn btn-primary" type="button" id="detailDownloadBtn">
@@ -158,6 +169,8 @@
 
       <p class="form-error" id="detailError"></p>
       <p class="detail-lock-banner" id="detailLockBanner" hidden></p>
+      <p class="detail-overtime-banner" id="detailOvertimeBanner" hidden></p>
+      <p class="detail-info-banner" id="detailMaintenanceBanner" hidden></p>
 
       <div class="detail-body">
         <div class="detail-screen">

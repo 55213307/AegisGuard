@@ -31,18 +31,26 @@ AUTO_ACTOR = "AegisGuard (automatic)"
 RECENT_EVENT_WINDOW = timedelta(minutes=15)
 
 
-# How long after the installer says it has started the computer's events are
-# left unjudged (installing and configuring takes a few minutes).
-MAINTENANCE_MINUTES = 20
+# How long after the installer says it is at work the computer's events are left
+# unjudged. The installer says so again before it configures the computer, so a
+# slow download doesn't use the window up before the work that needs it.
+MAINTENANCE_MINUTES = 10
+
+
+def _aware(t: datetime) -> datetime:
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)  # a database that doesn't keep time zones
 
 
 def begin_maintenance(db: Session, endpoint: Endpoint) -> datetime:
-    """Marks the start of an install: events up to the returned time aren't
-    scored and can't lock the computer."""
-    until = datetime.now(timezone.utc) + timedelta(minutes=MAINTENANCE_MINUTES)
-    endpoint.maintenance_until = until
+    """The installer is at work: events up to the returned time aren't scored
+    and can't lock the computer. Called again while a window is open it extends
+    it (from the moment of the call) and keeps the original start."""
+    now = datetime.now(timezone.utc)
+    if endpoint.maintenance_until is None or _aware(endpoint.maintenance_until) <= now:
+        endpoint.maintenance_from = now
+    endpoint.maintenance_until = now + timedelta(minutes=MAINTENANCE_MINUTES)
     db.commit()
-    return until
+    return _aware(endpoint.maintenance_until)
 
 
 def maintenance_windows(db: Session, endpoint_ids: set[int]) -> dict[int, datetime]:

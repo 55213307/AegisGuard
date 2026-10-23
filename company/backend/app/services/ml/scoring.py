@@ -101,10 +101,20 @@ def _score_failed_logons(events: list[dict], failed_count) -> None:
             _set(event, *failed_logon_risk(failed_count(event) if failed_count else 1))
 
 
-def _score_into(model: BehaviorModel, events: list[dict], failed_count=None) -> None:
+def _score_into(
+    model: BehaviorModel, events: list[dict], failed_count=None, overtime: dict | None = None, neutral_time: set | None = None
+) -> None:
     """Sets risk_score / risk_reason on each event dict that is a user action:
-    the model's judgement, except failed logons, which follow the rule above."""
+    the model's judgement, except failed logons, which follow the rule above.
+    `overtime` is endpoint id -> end of its approved overtime window; events
+    inside one are judged as if at a usual time (what was done still counts), and
+    so are all events of the endpoints in `neutral_time`: those whose working
+    hours the model doesn't know yet."""
     rows = [dataset.row_from_event(e) for e in events]
+    for event, row in zip(events, rows):
+        until = (overtime or {}).get(event["endpoint_id"])
+        if (until is not None and event["event_time"] <= until) or event["endpoint_id"] in (neutral_time or ()):
+            row["event_time"] = model.typical_time(row["event_time"])
     for event, row, score in zip(events, rows, model.score_many(rows)):
         if not is_user_action(row) or event.get("event_type") == _FAILED_LOGON:
             continue
@@ -112,10 +122,13 @@ def _score_into(model: BehaviorModel, events: list[dict], failed_count=None) -> 
     _score_failed_logons(events, failed_count)
 
 
-def apply(events: list[dict], get_model, failed_count=None) -> None:
+def apply(
+    events: list[dict], get_model, failed_count=None, overtime: dict | None = None, neutral_time: set | None = None
+) -> None:
     """Adds risk_score and risk_reason to parsed alerts (each carrying its
     endpoint_id). `get_model(endpoint_id)` returns the endpoint's model or
-    None; `failed_count` is failed_logon_counter's function. Every event gets
+    None; `failed_count` is failed_logon_counter's function; `overtime` the open
+    overtime windows (see _score_into). Every event gets
     both keys, so the rows can be inserted together."""
     by_endpoint: dict[int, list[dict]] = defaultdict(list)
     for event in events:
@@ -125,12 +138,12 @@ def apply(events: list[dict], get_model, failed_count=None) -> None:
     for endpoint_id, group in by_endpoint.items():
         model = get_model(endpoint_id)
         if model is not None:
-            _score_into(model, group, failed_count)
+            _score_into(model, group, failed_count, overtime, neutral_time)
         else:
             _score_failed_logons(group, failed_count)  # the rule needs no model
 
 
-def backfill(db, endpoint_id: int, model: BehaviorModel, days: int, batch: int = 2000) -> int:
+def backfill(db, endpoint_id: int, model: BehaviorModel, days: int, batch: int = 2000, neutral_time: bool = False) -> int:
     """Scores the endpoint's unscored real events from the last `days` days.
     Returns how many events got a score."""
     from sqlalchemy import or_, update
@@ -165,7 +178,7 @@ def backfill(db, endpoint_id: int, model: BehaviorModel, days: int, batch: int =
         )  # fmt: skip
     for i in range(0, len(updates), batch):
         chunk = updates[i : i + batch]
-        _score_into(model, chunk, failed_count)
+        _score_into(model, chunk, failed_count, neutral_time={endpoint_id} if neutral_time else None)
         db.execute(
             update(SE),
             [

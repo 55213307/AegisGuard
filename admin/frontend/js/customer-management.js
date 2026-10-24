@@ -118,7 +118,7 @@ addCustomerForm.addEventListener("submit", async (event) => {
     showPortalCredentials(created.credentials, { title: `Portal Login for ${created.company_name}` });
   } catch (err) {
     console.error("Failed to create customer", err);
-    alert(err.message || "Could not create this customer. Please try again.");
+    Dialogs.notice({ title: "Could not create the customer", message: err.message || "Please try again." });
   } finally {
     submitBtn.disabled = false;
   }

@@ -258,7 +258,7 @@ if (Get-Locked) { Show-Lock } else { Set-TaskManager $false }
 $sinceFrame = $Interval
 $sinceStatus = 0
 while ($true) {
-    if ($sinceStatus -ge 3) {
+    if ($sinceStatus -ge 2) {
         $sinceStatus = 0
         if (Get-Locked) { Show-Lock; $sinceFrame = $Interval }
     }
@@ -480,6 +480,14 @@ rem Event 4625 (failed logon) feeds the "3 wrong passwords" alert.
 auditpol /set /subcategory:"{{0CCE9215-69AE-11D9-BED3-505054503030}}" /success:enable /failure:enable >nul 2>&1
 rem Include the command line in 4688 events (e.g. "powershell -enc ...").
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f >nul 2>&1
+
+rem Log what is typed into PowerShell (event 4104), and have the Wazuh agent
+rem send that channel, so commands that start no program of their own (Get-Process,
+rem Get-LocalUser, ...) are seen too. Best effort, and only added once.
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1 /f >nul 2>&1
+powershell -NoProfile -Command "try {{ $f = $env:AGENT_DIR + '\ossec.conf'; $c = [IO.File]::ReadAllText($f); if ($c -notmatch 'PowerShell/Operational') {{ $b = '<localfile><location>Microsoft-Windows-PowerShell/Operational</location><log_format>eventchannel</log_format><query>Event/System[EventID=4104]</query></localfile>'; $i = $c.LastIndexOf('</ossec_config>'); [IO.File]::WriteAllText($f, $c.Insert($i, $b + [char]10)); }} }} catch {{}}" >nul 2>&1
+net stop WazuhSvc >nul 2>&1
+net start WazuhSvc >nul 2>&1
 
 echo [6/6] Setting up the live screen view...
 rem Defender would block the screen component, so exclude its folder first.

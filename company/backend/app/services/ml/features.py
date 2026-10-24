@@ -58,7 +58,14 @@ ADMIN_TOOLS = {
     "regedit.exe", "sc.exe", "auditpol.exe", "wmic.exe", "mmc.exe", "whoami.exe", "msiexec.exe", "taskkill.exe",
     "schtasks.exe", "certutil.exe", "tasklist.exe", "findstr.exe", "find.exe", "ping.exe", "curl.exe",
     "icacls.exe", "takeown.exe", "attrib.exe", "setx.exe", "bitsadmin.exe",
+    "ipconfig.exe", "systeminfo.exe", "nslookup.exe", "netstat.exe", "arp.exe", "route.exe", "nltest.exe",
+    "hostname.exe", "quser.exe", "query.exe", "tracert.exe", "pathping.exe", "getmac.exe", "nbtstat.exe",
+    "netsh.exe", "driverquery.exe", "wevtutil.exe", "vssadmin.exe", "bcdedit.exe", "cipher.exe", "gpresult.exe",
+    "secedit.exe", "runas.exe", "mshta.exe", "wscript.exe", "cscript.exe",
 }  # fmt: skip
+
+# Whatever a command prompt starts was typed by a person, whatever the program.
+SHELLS = {"powershell.exe", "pwsh.exe", "cmd.exe", "windowsterminal.exe", "wt.exe"}
 
 _NOT_PEOPLE = {"-", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE"}
 _USER_EVENT_TYPES = {"Login Success", "Login Failed", "Logoff", "Special Privileges"}
@@ -72,13 +79,19 @@ def is_user_action(row: dict) -> bool:
     """True for events that describe the user's behavior."""
     if row["windows_event_id"] == "4688":
         return is_person(row.get("creator")) and (row.get("process_name") or "") not in MAINTENANCE_TOOLS
+    if row["windows_event_id"] == "4104":  # a command typed into PowerShell
+        return is_person(row.get("creator"))
     return row["event_type"] in _USER_EVENT_TYPES
 
 
 def is_admin_tool(row: dict) -> bool:
     """A process creation of admin tooling: left out of the baseline when
     training, but still scored, so it stands out as never seen."""
-    return row["windows_event_id"] == "4688" and (row.get("process_name") or "") in ADMIN_TOOLS
+    if row["windows_event_id"] == "4104":  # typing commands into PowerShell is admin work by nature
+        return True
+    return row["windows_event_id"] == "4688" and (
+        (row.get("process_name") or "") in ADMIN_TOOLS or (row.get("parent_process") or "") in SHELLS
+    )
 
 
 def action_key(row: dict) -> str:

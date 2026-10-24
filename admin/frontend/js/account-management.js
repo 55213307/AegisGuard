@@ -202,13 +202,20 @@ tableBody.addEventListener("click", (event) => {
   if (event.target.closest(".am-action-view")) {
     openDrawer(account);
   } else if (event.target.closest(".am-action-delete")) {
-    if (!confirm(`Delete ${account.customer_name}'s account? This cannot be undone.`)) return;
-    apiFetch(`/api/accounts/${account.id}`, { method: "DELETE" })
-      .then(() => {
-        loadAccounts();
-        loadSummary();
-      })
-      .catch((err) => alert(err.message || "Could not delete this account."));
+    Dialogs.confirm({
+      title: `Delete ${account.customer_name}?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+      danger: true,
+    }).then((sure) => {
+      if (!sure) return;
+      apiFetch(`/api/accounts/${account.id}`, { method: "DELETE" })
+        .then(() => {
+          loadAccounts();
+          loadSummary();
+        })
+        .catch((err) => Dialogs.notice({ title: "Could not delete the account", message: err.message || "Please try again." }));
+    });
   }
 });
 
@@ -220,7 +227,12 @@ drawerActions.addEventListener("click", async (event) => {
   const action = btn.dataset.action;
 
   if (action === "reset-password") {
-    if (!confirm("Issue a new portal password? The current one will stop working immediately.")) return;
+    const sure = await Dialogs.confirm({
+      title: "Issue a new password?",
+      message: "The current one will stop working immediately.",
+      confirmLabel: "Issue password",
+    });
+    if (!sure) return;
     btn.disabled = true;
     try {
       const credentials = await apiFetch(`/api/accounts/${accountId}/reset-password`, { method: "POST" });
@@ -228,7 +240,7 @@ drawerActions.addEventListener("click", async (event) => {
       loadAccounts();
       showPortalCredentials(credentials, { title: `New Password for ${credentials.login_username}` });
     } catch (err) {
-      alert(err.message || "Could not reset the password. Please try again.");
+      Dialogs.notice({ title: "Could not reset the password", message: err.message || "Please try again." });
       btn.disabled = false;
     }
     return;
@@ -242,7 +254,7 @@ drawerActions.addEventListener("click", async (event) => {
     loadAccounts();
     loadSummary();
   } catch (err) {
-    alert(err.message || "Could not update this account. Please try again.");
+    Dialogs.notice({ title: "Could not update the account", message: err.message || "Please try again." });
     btn.disabled = false;
   }
 });

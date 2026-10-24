@@ -117,10 +117,14 @@ async function apiFetch(path, { method = "GET", body, skipAuthRedirect = false }
 
 // Downloads a file from an authenticated endpoint (a plain <a href> can't
 // send the Bearer token) and saves it under the server-provided filename.
-async function apiDownload(path, fallbackName) {
+// Pass `body` to POST it as JSON (e.g. sending the page's own filtered rows
+// so a generated file matches exactly what's on screen).
+async function apiDownload(path, fallbackName, { body } = {}) {
+  const headers = { Authorization: `Bearer ${getToken()}` };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
   let response;
   try {
-    response = await fetch(path, { headers: { Authorization: `Bearer ${getToken()}` } });
+    response = await fetch(path, { method: body !== undefined ? "POST" : "GET", headers, body: body !== undefined ? JSON.stringify(body) : undefined });
   } catch (networkError) {
     throw new Error("Could not reach the server. Please check your connection and try again.");
   }

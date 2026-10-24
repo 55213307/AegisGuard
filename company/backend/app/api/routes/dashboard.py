@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, require_password_changed
+from app.api.routes.employees import is_online
 from app.db.session import get_db
 from app.models.endpoint import Endpoint
 from app.models.security_event import SecurityEvent
@@ -50,7 +51,7 @@ def dashboard(
     try:
         info = wazuh.get_agents_info(agent_ids) if agent_ids else {}
         for endpoint in endpoints:
-            if (info.get(endpoint.wazuh_agent_id) or {}).get("status") == "active":
+            if is_online(info.get(endpoint.wazuh_agent_id) or {}):
                 online += 1
             else:
                 offline += 1

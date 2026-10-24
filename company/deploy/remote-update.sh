@@ -23,6 +23,30 @@ if getent group wazuh >/dev/null 2>&1; then
   usermod -a -G wazuh aegisguard
 fi
 
+echo "==> Installing AegisGuard rules into the Wazuh manager (if Wazuh is installed)"
+# PowerShell script blocks (event 4104) only become alerts with this rule. The
+# manager is restarted only when the rule file changed, and the new rules are
+# checked first: a broken rule file must not take the manager down.
+RULES_SRC=/opt/aegisguard/AegisGuard/company/deploy/wazuh/aegisguard_rules.xml
+RULES_DST=/var/ossec/etc/rules/aegisguard_rules.xml
+if [ -d /var/ossec/etc/rules ]; then
+  if ! cmp -s "$RULES_SRC" "$RULES_DST"; then
+    cp "$RULES_SRC" "$RULES_DST"
+    chown root:wazuh "$RULES_DST"
+    chmod 660 "$RULES_DST"
+    if /var/ossec/bin/wazuh-analysisd -t >/dev/null 2>&1; then
+      systemctl restart wazuh-manager
+      echo "   rules installed, wazuh-manager restarted"
+    else
+      rm -f "$RULES_DST"
+      echo "!! Wazuh rejected the AegisGuard rules; they were NOT installed (PowerShell commands will not be seen)."
+      /var/ossec/bin/wazuh-analysisd -t 2>&1 | tail -5 || true
+    fi
+  else
+    echo "   rules already up to date"
+  fi
+fi
+
 echo "==> Updating Nginx site config"
 cp /opt/aegisguard/AegisGuard/company/deploy/nginx-aegisguard.conf /etc/nginx/sites-available/aegisguard
 nginx -t

@@ -23,6 +23,7 @@ from app.schemas.employee import (
 from app.services import endpoint_lock, overtime, screens, wazuh
 from app.services.ml import registry
 from app.services.ml.model import ANOMALY_RISK_THRESHOLD, EXPLAIN_RISK_FROM
+from app.services.ml.scoring import CRITICAL_RISK
 from app.services.installer import build_installer
 
 # Served as "accounts" because that's what the portal's Account Management
@@ -76,16 +77,38 @@ def _parse_time(value: str | None) -> datetime | None:
     return None if parsed.year >= 9999 else parsed
 
 
+# An agent that hasn't reported for this long is shown as Offline.
+KEEPALIVE_GRACE = timedelta(seconds=60)
+
+
+def is_online(info: dict) -> bool:
+    """Wazuh keeps calling an agent "active" for ~10 minutes after it goes quiet;
+    it reports in every ~10 seconds, so a missing keepalive is already news."""
+    if info.get("status") != "active":
+        return False
+    last_seen = _parse_time(info.get("lastKeepAlive"))
+    return last_seen is None or datetime.now(timezone.utc) - last_seen <= KEEPALIVE_GRACE
+
 # How long an anomaly keeps its computer marked as "active" on Live Monitoring.
 ANOMALY_ACTIVE_MINUTES = 15
 
 
 def _risk_24h(db: Session, employees: list[Employee]) -> dict[int, tuple[int | None, int | None]]:
     """Per endpoint id: (highest risk score in the last 24 hours, highest in the
-    last ANOMALY_ACTIVE_MINUTES minutes)."""
+    last ANOMALY_ACTIVE_MINUTES minutes). Unlocking a computer starts its score
+    over, so only events after its last unlock count."""
     endpoint_ids = [e.endpoint.id for e in employees if e.endpoint is not None]
     if not endpoint_ids:
         return {}
+    unlocked = endpoint_lock.last_unlocks(db, endpoint_ids)
+    counted = or_(
+        *(
+            and_(SecurityEvent.endpoint_id == endpoint_id, SecurityEvent.event_time > unlocked[endpoint_id])
+            if endpoint_id in unlocked
+            else SecurityEvent.endpoint_id == endpoint_id
+            for endpoint_id in endpoint_ids
+        )
+    )
     now = datetime.now(timezone.utc)
     recent_since = now - timedelta(minutes=ANOMALY_ACTIVE_MINUTES)
     rows = (
@@ -94,7 +117,7 @@ def _risk_24h(db: Session, employees: list[Employee]) -> dict[int, tuple[int | N
             func.max(SecurityEvent.risk_score),
             func.max(case((SecurityEvent.event_time >= recent_since, SecurityEvent.risk_score), else_=None)),
         )
-        .filter(SecurityEvent.endpoint_id.in_(endpoint_ids), SecurityEvent.event_time >= now - timedelta(hours=24))
+        .filter(counted, SecurityEvent.event_time >= now - timedelta(hours=24))
         .group_by(SecurityEvent.endpoint_id)
         .all()
     )
@@ -122,6 +145,8 @@ def _to_out(
     else:
         info = agents_info.get(endpoint.wazuh_agent_id, {})
         status = _STATUS_LABELS.get(info.get("status"), "Unknown")
+        if status == "Online" and not is_online(info):
+            status = "Offline"
 
     os_info = info.get("os") or {}
     os_name = " ".join(part for part in (os_info.get("name"), os_info.get("version")) if part) or None
@@ -148,7 +173,10 @@ def _to_out(
         maintenance_until=endpoint.maintenance_until if endpoint else None,
         **_learning(endpoint),
         risk_24h=day_risk,
-        risk_active=recent_risk if recent_risk is not None and recent_risk >= ANOMALY_RISK_THRESHOLD else None,
+        # Only a Critical-level anomaly marks the computer as actively alerting
+        # (red border on Live Monitoring); a Warning stays visible in its risk
+        # score but doesn't raise a flag.
+        risk_active=recent_risk if recent_risk is not None and recent_risk >= CRITICAL_RISK else None,
     )
 
 
@@ -270,6 +298,29 @@ def clear_work_hours(
     db.commit()
     if employee.endpoint is not None:
         registry.retrain_soon(employee.endpoint.id)
+    return _to_out(employee, _agents_info([employee]))
+
+
+# Last time each endpoint's model was force-retrained from the portal, to stop
+# a double-click (or an impatient refresh) queuing up several trainings at once.
+_last_retrain_request: dict[int, float] = {}
+RETRAIN_COOLDOWN_SECONDS = 30
+
+
+@router.post("/{employee_id}/retrain", response_model=EmployeeOut)
+def retrain_now(
+    employee_id: int, principal: Principal = Depends(require_password_changed), db: Session = Depends(get_db)
+) -> EmployeeOut:
+    """Trains this endpoint's model right away instead of waiting for the
+    scheduled round, so the Behavior Model progress reflects recent activity
+    without a multi-hour wait. Training runs in the background; the response
+    is the account as it is now, before the new model is ready."""
+    employee = _get_employee_or_404(employee_id, principal, db)
+    if employee.endpoint is not None:
+        now = time.time()
+        if now - _last_retrain_request.get(employee.endpoint.id, 0.0) >= RETRAIN_COOLDOWN_SECONDS:
+            _last_retrain_request[employee.endpoint.id] = now
+            registry.retrain_soon(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
 
 

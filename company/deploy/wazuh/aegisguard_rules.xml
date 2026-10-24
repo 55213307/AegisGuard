@@ -1,0 +1,17 @@
+<!--
+  AegisGuard rules for the Wazuh manager, installed to /var/ossec/etc/rules/ by
+  deploy/remote-update.sh.
+
+  100100: a PowerShell script block (event 4104) from an endpoint. The agent
+  collects the channel (the installer adds it to ossec.conf) and Wazuh has no
+  alert for these by default, so without this rule they never reach alerts.json
+  and the portal can't see what is typed into PowerShell. Level 3 is the lowest
+  that is written to alerts.json; the portal does the judging itself.
+-->
+<group name="aegisguard,powershell,">
+  <rule id="100100" level="3">
+    <if_sid>60000</if_sid>
+    <field name="win.system.eventID">^4104$</field>
+    <description>PowerShell script block executed</description>
+  </rule>
+</group>

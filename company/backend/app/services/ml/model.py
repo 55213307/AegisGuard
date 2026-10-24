@@ -183,7 +183,7 @@ class BehaviorModel:
         events."""
         if score.risk < EXPLAIN_RISK_FROM:
             return None
-        what = row.get("process_name") or row.get("event_type") or "this activity"
+        what = row.get("process_name") or (f"PowerShell: {row['command']}" if row.get("command") else None) or row.get("event_type") or "this activity"
         if score.novelty:
             return f"Never seen on this endpoint before: {what}"
         hour = local_hour(row["event_time"])

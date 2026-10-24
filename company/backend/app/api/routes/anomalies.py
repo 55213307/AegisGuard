@@ -7,7 +7,7 @@ from app.db.session import get_db
 from app.models.endpoint import Endpoint
 from app.models.security_event import SecurityEvent
 from app.schemas.anomaly import AnomalyAlert, AnomalyFeed
-from app.services.ml.model import ANOMALY_RISK_THRESHOLD
+from app.services.ml.scoring import CRITICAL_RISK
 
 router = APIRouter(prefix="/api/anomalies", tags=["anomalies"])
 
@@ -34,7 +34,9 @@ def feed(
         .filter(
             SecurityEvent.unique_id == principal.company_id,
             SecurityEvent.id > after_id,
-            SecurityEvent.risk_score >= ANOMALY_RISK_THRESHOLD,
+            # Only Critical anomalies pop up and sound an alarm; a Warning is
+            # still visible in the endpoint's risk score, just not pushed at anyone.
+            SecurityEvent.risk_score >= CRITICAL_RISK,
         )
         .order_by(SecurityEvent.id.asc())
         .limit(FEED_LIMIT)

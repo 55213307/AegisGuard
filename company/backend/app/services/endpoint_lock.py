@@ -68,6 +68,22 @@ def maintenance_windows(db: Session, endpoint_ids: set[int]) -> dict[int, dateti
     return windows
 
 
+def last_unlocks(db: Session, endpoint_ids) -> dict[int, datetime]:
+    """endpoint id -> when its employee was last unlocked, for those that were.
+    Unlocking starts the computer's risk over: what it did before doesn't count
+    towards its risk score any more (the events themselves stay in the log)."""
+    endpoint_ids = list(endpoint_ids)
+    if not endpoint_ids:
+        return {}
+    rows = (
+        db.query(Endpoint.id, func.max(LockEvent.event_time))
+        .join(LockEvent, LockEvent.employee_id == Endpoint.employee_id)
+        .filter(Endpoint.id.in_(endpoint_ids), LockEvent.action == "unlock")
+        .group_by(Endpoint.id)
+    )
+    return {endpoint_id: _aware(t) for endpoint_id, t in rows}
+
+
 def is_locked(employee: Employee) -> bool:
     return employee.employee_status == EmployeeStatus.LOCKED
 

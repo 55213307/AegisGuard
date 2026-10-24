@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # ingester idles when the file doesn't exist (e.g. local dev on Windows).
     ingest_enabled: bool = True
     alerts_file_path: str = "/var/ossec/logs/alerts/alerts.json"
-    ingest_poll_seconds: float = 5.0
+    ingest_poll_seconds: float = 2.0
 
     # Behavioral anomaly model (app/services/ml/registry.py): one Isolation
     # Forest per endpoint, trained at start-up and then retrained on a schedule

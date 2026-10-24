@@ -32,7 +32,7 @@ function showPortalCredentials(credentials, { title = "Company Portal Login" } =
       button.textContent = "Copied";
       setTimeout(() => (button.textContent = original), 1200);
     } catch (err) {
-      alert("Could not copy automatically. Please select and copy the text manually.");
+      Dialogs.notice({ title: "Could not copy", message: "Please select and copy the text manually." });
     }
   }
 

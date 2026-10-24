@@ -67,11 +67,19 @@ def failed_logon_counter(db, batch: list[dict] | None = None):
 
     from app.models.security_event import SecurityEvent as SE
 
+    from app.services import endpoint_lock
+
     in_batch = [e for e in batch or [] if e.get("event_type") == _FAILED_LOGON]
+    unlocked_at: dict[int, object] = {}
 
     def count(event: dict) -> int:
         t = event["event_time"]
         start = t - FAILED_LOGON_WINDOW
+        # Failures from before the last unlock are forgiven: the count starts over.
+        if event["endpoint_id"] not in unlocked_at:
+            unlocked_at[event["endpoint_id"]] = endpoint_lock.last_unlocks(db, [event["endpoint_id"]]).get(event["endpoint_id"])
+        if unlocked_at[event["endpoint_id"]] is not None:
+            start = max(start, unlocked_at[event["endpoint_id"]])
         stored = (
             db.query(func.count(SE.id))
             .filter(

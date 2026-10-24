@@ -21,6 +21,7 @@ from app.models.security_event import SecurityEvent
 from app.services.alerts import agent_id_of, parse_alert
 from app.services import endpoint_lock, health, overtime
 from app.services.ml import registry, scoring
+from app.services.ml.dataset import powershell_command
 
 log = logging.getLogger("aegisguard.ingest")
 
@@ -84,6 +85,10 @@ def _store(db, lines: list[bytes], agents: dict[str, tuple[int, int]]) -> int:
             continue  # manager's own alert, or an endpoint we don't manage
         parsed = parse_alert(alert)
         if parsed is None:
+            continue
+        # Script block logging also records everything the system itself runs in
+        # PowerShell; only what a person typed is of interest.
+        if parsed["windows_event_id"] == "4104" and not powershell_command(parsed["details"]):
             continue
         endpoint_id, unique_id = agents[agent_id]
         rows.append({**parsed, "endpoint_id": endpoint_id, "unique_id": unique_id})

@@ -1,13 +1,13 @@
+// Info-level events (routine logons, configuration scans) never reach this
+// page — the backend already leaves them out, so only these two matter here.
 const SEVERITY_BADGE_CLASS = {
   critical: "badge-danger",
   warning: "badge-warning",
-  info: "badge-success",
 };
 
 const SEVERITY_LABEL = {
   critical: "Critical",
   warning: "Warning",
-  info: "Info",
 };
 
 let allLogs = [];
@@ -16,9 +16,12 @@ const tableBody = document.getElementById("logsTableBody");
 const searchInput = document.getElementById("logSearchInput");
 const severityFilter = document.getElementById("severityFilter");
 const eventTypeFilter = document.getElementById("eventTypeFilter");
+const endpointFilter = document.getElementById("endpointFilter");
+const userFilter = document.getElementById("userFilter");
 const riskFilter = document.getElementById("riskFilter");
 const dateRangeFilter = document.getElementById("dateRangeFilter");
 const exportLogsBtn = document.getElementById("exportLogsBtn");
+const downloadReportBtn = document.getElementById("downloadReportBtn");
 
 function formatTimestamp(isoString) {
   const date = new Date(isoString);
@@ -27,16 +30,28 @@ function formatTimestamp(isoString) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function populateEventTypeOptions() {
-  const types = [...new Set(allLogs.map((log) => log.event_type))].sort();
-  eventTypeFilter.innerHTML = `<option value="">Event Type: All</option>` +
-    types.map((type) => `<option value="${type}">${type}</option>`).join("");
+// Rebuilds a filter's options from the loaded logs, keeping whatever was
+// selected if it's still one of them (it drops out otherwise, e.g. an
+// endpoint with no events left in a newly picked date range).
+function populateOptions(select, values, placeholder) {
+  const current = select.value;
+  select.innerHTML =
+    `<option value="">${placeholder}</option>` + values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+  if (values.includes(current)) select.value = current;
+}
+
+function populateFilterOptions() {
+  populateOptions(eventTypeFilter, [...new Set(allLogs.map((log) => log.event_type).filter(Boolean))].sort(), "Event Type: All");
+  populateOptions(endpointFilter, [...new Set(allLogs.map((log) => log.endpoint_name).filter(Boolean))].sort(), "Endpoint: All");
+  populateOptions(userFilter, [...new Set(allLogs.map((log) => log.user).filter(Boolean))].sort(), "User: All");
 }
 
 function getFilteredLogs() {
   const query = searchInput.value.trim().toLowerCase();
   const severity = severityFilter.value;
   const eventType = eventTypeFilter.value;
+  const endpoint = endpointFilter.value;
+  const user = userFilter.value;
   const risk = riskFilter.value;
   const minRisk = risk === "anomaly" ? RISK_ANOMALY_THRESHOLD : risk === "elevated" ? 50 : null;
 
@@ -48,9 +63,26 @@ function getFilteredLogs() {
       log.description.toLowerCase().includes(query);
     const matchesSeverity = !severity || log.severity === severity;
     const matchesEventType = !eventType || log.event_type === eventType;
+    const matchesEndpoint = !endpoint || log.endpoint_name === endpoint;
+    const matchesUser = !user || log.user === user;
     const matchesRisk = minRisk === null || (log.risk_score != null && log.risk_score >= minRisk);
-    return matchesQuery && matchesSeverity && matchesEventType && matchesRisk;
+    return matchesQuery && matchesSeverity && matchesEventType && matchesEndpoint && matchesUser && matchesRisk;
   });
+}
+
+// Plain-English list of whatever filters are narrowing the table right now,
+// for the PDF report to say up front what it does and doesn't cover.
+function describeFilters() {
+  const parts = [];
+  const days = dateRangeFilter.options[dateRangeFilter.selectedIndex].textContent;
+  parts.push(days);
+  if (severityFilter.value) parts.push(`Severity: ${SEVERITY_LABEL[severityFilter.value]}`);
+  if (eventTypeFilter.value) parts.push(`Event Type: ${eventTypeFilter.value}`);
+  if (endpointFilter.value) parts.push(`Endpoint: ${endpointFilter.value}`);
+  if (userFilter.value) parts.push(`User: ${userFilter.value}`);
+  if (riskFilter.value) parts.push(riskFilter.options[riskFilter.selectedIndex].textContent);
+  if (searchInput.value.trim()) parts.push(`Search: "${searchInput.value.trim()}"`);
+  return parts.join("; ");
 }
 
 function riskCell(log) {
@@ -89,7 +121,7 @@ async function loadLogs() {
   try {
     const data = await apiFetch(`/api/security-logs?days=${days}`);
     allLogs = data.items || [];
-    populateEventTypeOptions();
+    populateFilterOptions();
     renderLogsTable();
   } catch (err) {
     console.error("Failed to load security logs", err);
@@ -101,6 +133,8 @@ searchInput.addEventListener("input", renderLogsTable);
 severityFilter.addEventListener("change", renderLogsTable);
 riskFilter.addEventListener("change", renderLogsTable);
 eventTypeFilter.addEventListener("change", renderLogsTable);
+endpointFilter.addEventListener("change", renderLogsTable);
+userFilter.addEventListener("change", renderLogsTable);
 dateRangeFilter.addEventListener("change", loadLogs);
 
 function csvCell(value) {
@@ -141,6 +175,25 @@ exportLogsBtn.addEventListener("click", () => {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+});
+
+// Exports exactly the rows the table currently shows — same filters as the
+// CSV export, formatted as a branded PDF.
+downloadReportBtn.addEventListener("click", async () => {
+  const rows = getFilteredLogs();
+  downloadReportBtn.disabled = true;
+  const original = downloadReportBtn.textContent;
+  downloadReportBtn.textContent = "Preparing report…";
+  try {
+    await apiDownload("/api/security-logs/report", "aegisguard-security-report.pdf", {
+      body: { items: rows, filters_summary: describeFilters() },
+    });
+  } catch (err) {
+    await Dialogs.notice({ title: "Could not create the report", message: err.message || "Please try again." });
+  } finally {
+    downloadReportBtn.disabled = false;
+    downloadReportBtn.textContent = original;
+  }
 });
 
 loadLogs();

@@ -58,6 +58,8 @@ _WINDOWS_EVENT_LABELS: dict[str, str] = {
 def _event_type(groups: list[str], decoder: str | None, windows_event_id: str | None = None) -> str | None:
     # Wazuh group names sometimes carry stray whitespace (e.g. " WEF").
     groups = [g.strip() for g in groups]
+    if windows_event_id == "4104":  # whatever rule matched, this is a PowerShell script block
+        return "PowerShell Command"
     for keyword, label in _GROUP_LABELS:
         if any(keyword in g for g in groups):
             return label

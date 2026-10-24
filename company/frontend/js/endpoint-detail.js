@@ -192,15 +192,17 @@ const EndpointDetail = (() => {
       ["Agent Version", account.agent_version || "—"],
       ["Last Seen", timeAgo(account.last_seen_time)],
       ["Risk Score (24h peak)", riskText(account.risk_24h)],
-      ["Behavior Model", learningText(account)],
     ];
     if (hasWindow()) {
       const day = new Date(account.maintenance_from).toLocaleDateString("en-US", { month: "short", day: "numeric" });
       rows.push(["Setup Exemption", `${day}, ${clock(account.maintenance_from)} to ${clock(account.maintenance_until)}`]);
     }
     const hours = account.work_start && account.work_end ? `${account.work_start}\u2013${account.work_end}` : "Learned from activity";
+    // The learning progress shown is only as fresh as the last training round, which
+    // can be hours old, so a manual retrain is offered rather than making people wait.
     document.getElementById("detailInfoList").innerHTML =
       rows.map(([label, value]) => `<div class="info-row"><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join("") +
+      `<div class="info-row"><dt>Behavior Model</dt><dd>${escapeHtml(learningText(account))} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailRetrainBtn">Retrain Now</button>` : ""}</dd></div>` +
       `<div class="info-row"><dt>Working Hours</dt><dd>${escapeHtml(hours)} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailHoursBtn">Edit</button>` : ""}</dd></div>`;
     renderLiveLine();
   }
@@ -284,18 +286,23 @@ const EndpointDetail = (() => {
 
   // Declare (or clear) the employee's working hours; the behavior model is retrained
   // right away, so it learns the new hours without waiting.
+  const HOURS_PATTERN = /^(\d{1,2}:\d{2})\s*(?:-|\u2013|to)\s*(\d{1,2}:\d{2})$/i;
+
   async function editWorkHours() {
     if (!account || !account.endpoint_name) return;
     const current = account.work_start && account.work_end ? `${account.work_start}-${account.work_end}` : "";
-    const answer = window.prompt(
-      `Working hours for ${account.endpoint_name}, as start-end in 24-hour time, e.g. 09:00-18:00.\nLeave it empty to let AegisGuard learn them from the computer's activity.`,
-      current
-    );
+    const answer = await Dialogs.prompt({
+      title: "Working hours",
+      message: `Working hours for ${account.endpoint_name}, as start-end in 24-hour time, e.g. 09:00-18:00.\nLeave it empty to let AegisGuard learn them from the computer's activity.`,
+      value: current,
+      placeholder: "09:00-18:00",
+      validate: (text) => (text && !HOURS_PATTERN.test(text) ? "Enter the hours like 09:00-18:00." : null),
+    });
     if (answer === null) return;
     const text = answer.trim();
     let request = { method: "DELETE" };
     if (text) {
-      const parts = text.match(/^(\d{1,2}:\d{2})\s*(?:-|\u2013|to)\s*(\d{1,2}:\d{2})$/i);
+      const parts = text.match(HOURS_PATTERN);
       if (!parts) {
         errorEl.textContent = "Enter the hours like 09:00-18:00.";
         return;
@@ -313,16 +320,38 @@ const EndpointDetail = (() => {
 
   document.getElementById("detailInfoList").addEventListener("click", (event) => {
     if (event.target.id === "detailHoursBtn") editWorkHours();
+    if (event.target.id === "detailRetrainBtn") retrainNow(event.target);
   });
+
+  // Training happens in the background; give it a moment, then pull the fresh
+  // progress rather than leaving the old number showing.
+  async function retrainNow(button) {
+    if (!account) return;
+    button.disabled = true;
+    button.textContent = "Retraining…";
+    try {
+      await apiFetch(`/api/accounts/${account.id}/retrain`, { method: "POST" });
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      render(await apiFetch(`/api/accounts/${account.id}`));
+      onChanged();
+    } catch (err) {
+      errorEl.textContent = err.message || "Could not retrain the model. Please try again.";
+      button.disabled = false;
+      button.textContent = "Retrain Now";
+    }
+  }
 
   overtimeBtn.addEventListener("click", async () => {
     if (!account) return;
     let request = { method: "DELETE" };
     if (!overtimeActive()) {
-      const answer = window.prompt(
-        `Allow overtime on ${account.endpoint_name || account.employee_username} until what time (24-hour, e.g. 22:00), or for how many hours (e.g. 3)?`,
-        "3"
-      );
+      const answer = await Dialogs.prompt({
+        title: "Allow overtime",
+        message: `Allow overtime on ${account.endpoint_name || account.employee_username} until what time (24-hour, e.g. 22:00), or for how many hours (e.g. 3)?`,
+        value: "3",
+        confirmLabel: "Allow",
+        validate: (text) => (overtimeMinutes(text) === null ? "Enter a time like 22:00, or a number of hours like 3 (at most 12 hours)." : null),
+      });
       if (answer === null) return;
       const minutes = overtimeMinutes(answer.trim());
       if (minutes === null) {
@@ -346,7 +375,15 @@ const EndpointDetail = (() => {
   lockBtn.addEventListener("click", async () => {
     if (!account) return;
     const locking = !isLocked();
-    if (locking && !window.confirm(`Lock ${account.endpoint_name || account.employee_username}? The user will be locked out of this computer until you unlock it here.`)) return;
+    if (locking) {
+      const sure = await Dialogs.confirm({
+        title: `Lock ${account.endpoint_name || account.employee_username}?`,
+        message: "The user will be locked out of this computer until you unlock it here.",
+        confirmLabel: "Lock",
+        danger: true,
+      });
+      if (!sure) return;
+    }
     errorEl.textContent = "";
     lockBtn.disabled = true;
     try {

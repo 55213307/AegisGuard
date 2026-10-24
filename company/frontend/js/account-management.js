@@ -94,7 +94,13 @@ tableBody.addEventListener("click", async (event) => {
     const uninstall = account.endpoint_name
       ? " AegisGuard will also uninstall itself from their computer the next time it is online (within about 5 minutes)."
       : "";
-    if (!confirm(`Delete ${account.employee_username}'s account? Their computer will stop being monitored.${uninstall} This can't be undone.`)) return;
+    const sure = await Dialogs.confirm({
+      title: `Delete ${account.employee_username}?`,
+      message: `Their computer will stop being monitored.${uninstall} This can't be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!sure) return;
   }
 
   button.disabled = true;
@@ -106,7 +112,7 @@ tableBody.addEventListener("click", async (event) => {
     }
     await loadAccounts();
   } catch (err) {
-    alert(err.message || "Could not update this account. Please try again.");
+    Dialogs.notice({ title: "Could not update the account", message: err.message || "Please try again." });
     button.disabled = false;
   }
 });

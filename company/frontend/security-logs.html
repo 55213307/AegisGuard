@@ -48,29 +48,42 @@
           <h1 class="page-title font-tech">Security Logs</h1>
           <p class="page-subtitle">Searchable historical security event logs</p>
         </div>
-        <button class="btn btn-primary" type="button" id="exportLogsBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
-          Export Logs
-        </button>
+        <div class="topbar-actions">
+          <button class="btn btn-secondary" type="button" id="downloadReportBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 3.5h7l3.5 3.5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/><path d="M14 3.5V7h3.5"/></svg>
+            Download PDF Report
+          </button>
+          <button class="btn btn-primary" type="button" id="exportLogsBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 19h14"/></svg>
+            Export Logs
+          </button>
+        </div>
       </div>
 
       <div class="filter-bar">
-        <label class="control log-search">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2"/></svg>
-          <input type="text" id="logSearchInput" placeholder="Search logs (hostname, user, keyword)" />
-        </label>
         <label class="control-select">
           <select id="severityFilter">
             <option value="">Severity: All</option>
             <option value="critical">Critical</option>
             <option value="warning">Warning</option>
-            <option value="info">Info</option>
           </select>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
         </label>
         <label class="control-select">
           <select id="eventTypeFilter">
             <option value="">Event Type: All</option>
+          </select>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
+        </label>
+        <label class="control-select">
+          <select id="endpointFilter">
+            <option value="">Endpoint: All</option>
+          </select>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
+        </label>
+        <label class="control-select">
+          <select id="userFilter">
+            <option value="">User: All</option>
           </select>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
         </label>
@@ -89,6 +102,10 @@
             <option value="90">Last 90 days</option>
           </select>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg>
+        </label>
+        <label class="control log-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2"/></svg>
+          <input type="text" id="logSearchInput" placeholder="Search logs…" />
         </label>
       </div>
 
@@ -119,6 +136,7 @@
   <script src="js/format.js"></script>
   <script src="js/sidebar.js"></script>
   <script src="js/anomaly-alerts.js"></script>
+  <script src="js/dialogs.js"></script>
   <script src="js/security-logs.js"></script>
 </body>
 </html>

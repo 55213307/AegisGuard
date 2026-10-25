@@ -1,6 +1,8 @@
 import re
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.models.employee import EmployeeStatus
@@ -21,6 +23,10 @@ def _clock_time(value: str) -> str:
 class EmployeeCreate(BaseModel):
     employee_username: str
     employee_email: EmailStr
+    # What the behavior model treats as ordinary: "auto" (the default) learns it from the
+    # computer's own activity; IT and security staff use command prompts and admin tools
+    # every day, clerks never do, and these can be declared up front.
+    department: Literal["auto", "office", "it", "security"] = "auto"
     # Optional: the working hours, when the company already knows them. Left out,
     # the behavior model learns them from the computer's activity.
     work_start: str | None = None
@@ -78,6 +84,7 @@ class EmployeeOut(BaseModel):
     # Working hours the company declared ("HH:MM"); None: learned from the activity.
     work_start: str | None = None
     work_end: str | None = None
+    department: str = "auto"
     # The computer's last setup window: while an installer is at work its events
     # aren't checked (they would look like admin tooling). Both ends, or None.
     maintenance_from: datetime | None = None
@@ -97,6 +104,10 @@ class EmployeeOut(BaseModel):
 
 class OvertimeRequest(BaseModel):
     minutes: int = Field(ge=1, le=720)
+
+
+class DepartmentRequest(BaseModel):
+    department: Literal["auto", "office", "it", "security"]
 
 
 class WorkHoursRequest(BaseModel):

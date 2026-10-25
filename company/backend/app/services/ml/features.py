@@ -64,6 +64,44 @@ ADMIN_TOOLS = {
     "secedit.exe", "runas.exe", "mshta.exe", "wscript.exe", "cscript.exe",
 }  # fmt: skip
 
+# HIGH_RISK_TOOLS are the part of that list that is mostly used to attack or to
+# tamper with the machine (downloading, hiding, wiping, impersonating). They stay
+# suspicious whoever is at the keyboard; the rest of ADMIN_TOOLS is everyday
+# work for IT and security staff (see DEPARTMENTS).
+HIGH_RISK_TOOLS = {
+    "certutil.exe", "bitsadmin.exe", "mshta.exe", "wscript.exe", "cscript.exe", "vssadmin.exe", "bcdedit.exe",
+    "runas.exe",
+}  # fmt: skip
+
+# The department an employee works in, which decides whether command-line and
+# admin tooling is ordinary for them: an IT or security person lives in cmd and
+# PowerShell, an office clerk never opens them. Where it is expected, those
+# tools are learned like any other program instead of being flagged on sight.
+#
+# "auto" is the default and needs nobody to say anything: admin tools are flagged at
+# first, and a computer's own habits are learned (see adopted_actions in registry.py).
+# "office" is a deliberate choice that they never become normal.
+DEPARTMENTS = {
+    "auto": {"label": "Auto (learn from activity)", "admin_ok": False, "adopt": True},
+    "office": {"label": "Office staff", "admin_ok": False, "adopt": False},
+    "it": {"label": "IT", "admin_ok": True, "adopt": False},
+    "security": {"label": "Security", "admin_ok": True, "adopt": False},
+}
+DEFAULT_DEPARTMENT = "auto"
+
+
+def _department(department: str | None) -> dict:
+    return DEPARTMENTS.get(department or DEFAULT_DEPARTMENT, DEPARTMENTS[DEFAULT_DEPARTMENT])
+
+
+def admin_ok_for(department: str | None) -> bool:
+    return _department(department)["admin_ok"]
+
+
+def adopts_habits(department: str | None) -> bool:
+    return _department(department)["adopt"]
+
+
 # Whatever a command prompt starts was typed by a person, whatever the program.
 SHELLS = {"powershell.exe", "pwsh.exe", "cmd.exe", "windowsterminal.exe", "wt.exe"}
 
@@ -84,14 +122,21 @@ def is_user_action(row: dict) -> bool:
     return row["event_type"] in _USER_EVENT_TYPES
 
 
-def is_admin_tool(row: dict) -> bool:
+def is_admin_tool(row: dict, admin_ok: bool = False) -> bool:
     """A process creation of admin tooling: left out of the baseline when
-    training, but still scored, so it stands out as never seen."""
-    if row["windows_event_id"] == "4104":  # typing commands into PowerShell is admin work by nature
+    training, but still scored, so it stands out as never seen. With `admin_ok`
+    (IT and security staff) everyday admin tooling and commands typed into a
+    shell are ordinary, so only HIGH_RISK_TOOLS still count."""
+    if row["windows_event_id"] == "4104":  # typing commands into PowerShell
+        return not admin_ok
+    if row["windows_event_id"] != "4688":
+        return False
+    name = row.get("process_name") or ""
+    if name in HIGH_RISK_TOOLS:
         return True
-    return row["windows_event_id"] == "4688" and (
-        (row.get("process_name") or "") in ADMIN_TOOLS or (row.get("parent_process") or "") in SHELLS
-    )
+    if admin_ok:
+        return False
+    return name in ADMIN_TOOLS or (row.get("parent_process") or "") in SHELLS
 
 
 def action_key(row: dict) -> str:

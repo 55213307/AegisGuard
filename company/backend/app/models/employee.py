@@ -36,6 +36,9 @@ class Employee(Base):
     # Why and since when the account (and so the employee's computer) is locked.
     lock_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Which department they work in (features.DEPARTMENTS): "auto" learns from their own
+    # activity; the others declare whether command-line and admin tools are ordinary.
+    department: Mapped[str] = mapped_column(String(20), default="auto", server_default="auto")
     # While an administrator has approved overtime (see services/overtime.py).
     overtime_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Working hours the company declared ("HH:MM", local time); both None = learn them.

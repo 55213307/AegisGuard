@@ -169,7 +169,7 @@ def backfill(db, endpoint_id: int, model: BehaviorModel, days: int, batch: int =
             SE.risk_score.is_(None),
             SE.event_time >= since,
             ~SE.wazuh_alert_id.like(dataset.SEED_PREFIX + "%"),
-            or_(SE.windows_event_id == "4688", SE.event_type.in_(dataset._USER_EVENT_TYPES)),
+            or_(SE.windows_event_id.in_(("4688", "4104")), SE.event_type.in_(dataset._USER_EVENT_TYPES)),
         )
         .order_by(SE.event_time)
     )

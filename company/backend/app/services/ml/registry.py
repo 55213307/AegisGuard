@@ -36,7 +36,9 @@ from app.models.endpoint import Endpoint
 from app.services import health
 from app.services.ml import baseline as auto_baseline
 from app.services.ml import dataset, scoring, seed_baseline
-from app.services.ml.features import is_admin_tool, is_user_action
+from app.services.ml.features import (
+    HIGH_RISK_TOOLS, LOCAL_TZ, action_key, admin_ok_for, adopts_habits, is_admin_tool, is_user_action,
+)
 from app.services.ml.model import BehaviorModel
 
 log = logging.getLogger("aegisguard.ml")
@@ -59,6 +61,8 @@ class Entry:
     # entered), "file" (a dataset someone chose for this endpoint), "auto" (an
     # assumed working pattern) or "none".
     baseline_source: str = "none"
+    # Admin tools this computer made a habit of and the model learned (action keys).
+    adopted: frozenset = frozenset()
 
     @property
     def time_trusted(self) -> bool:
@@ -112,6 +116,24 @@ def learning_progress(endpoint_id: int) -> dict | None:
     }
 
 
+def adopted_actions(real_rows: list[dict], admin_ok: bool, adopt_days: int) -> frozenset:
+    """Admin tools this computer has made a habit of: used on at least `adopt_days`
+    different days. The model learns those as ordinary (autonomously, nobody has to
+    declare a department) instead of flagging them forever. Tools that are mostly
+    used to attack or tamper (HIGH_RISK_TOOLS) are never adopted, and one burst of
+    use on a single day is not a habit."""
+    if adopt_days <= 0:
+        return frozenset()
+    days: dict[str, set] = {}
+    for r in real_rows:
+        if not is_user_action(r) or not is_admin_tool(r, admin_ok):
+            continue
+        if (r.get("process_name") or "") in HIGH_RISK_TOOLS:
+            continue
+        days.setdefault(action_key(r), set()).add(r["event_time"].astimezone(LOCAL_TZ).date())
+    return frozenset(key for key, seen in days.items() if len(seen) >= adopt_days)
+
+
 def select_training_rows(
     real_rows: list[dict],
     previous: BehaviorModel | None,
@@ -120,6 +142,8 @@ def select_training_rows(
     min_days: int | None = None,
     exclude_flagged: bool | None = None,
     previous_trusted: bool = True,
+    admin_ok: bool = False,
+    adopted: frozenset = frozenset(),
 ) -> tuple[list[dict], str, int, int]:
     """(rows to train on, mode, number of real actions excluded as flagged,
     number of clean real actions). `load_baseline(n_real)` (the baseline rows,
@@ -131,10 +155,10 @@ def select_training_rows(
     min_days = settings.ml_min_real_days if min_days is None else min_days
     exclude_flagged = settings.ml_exclude_flagged if exclude_flagged is None else exclude_flagged
 
-    clean = [r for r in real_rows if is_user_action(r) and not is_admin_tool(r)]
+    clean = [r for r in real_rows if is_user_action(r) and (not is_admin_tool(r, admin_ok) or action_key(r) in adopted)]
     excluded = 0
     if exclude_flagged and previous is not None and previous_trusted and clean:
-        kept = [r for r, s in zip(clean, previous.score_many(clean)) if not s.is_anomaly]
+        kept = [r for r, s in zip(clean, previous.score_many(clean)) if not s.is_anomaly or action_key(r) in adopted]
         excluded, clean = len(clean) - len(kept), kept
 
     span_days = (max(r["event_time"] for r in clean) - min(r["event_time"] for r in clean)).days if clean else 0
@@ -143,7 +167,14 @@ def select_training_rows(
     baseline = load_baseline(len(clean))
     if not baseline and not clean:
         raise NoBaseline("no baseline file for this endpoint and no real history yet")
-    return baseline + clean, "baseline+real", excluded, len(clean)
+    extra: list[dict] = []
+    if adopted and baseline:
+        # The assumed baseline outweighs the little real history there is, which would
+        # still make a habit look rare. Count the adopted habits as often as the real
+        # history deserves next to it, so they come out ordinary straight away.
+        factor = max(1, round(len(baseline) / max(len(clean), 1)))
+        extra = [r for r in clean if action_key(r) in adopted] * (factor - 1)
+    return baseline + clean + extra, "baseline+real", excluded, len(clean)
 
 
 def train_endpoint(db, endpoint_id: int) -> Entry | None:
@@ -158,6 +189,10 @@ def train_endpoint(db, endpoint_id: int) -> Entry | None:
     employee = (
         db.query(Employee).join(Endpoint, Endpoint.employee_id == Employee.id).filter(Endpoint.id == endpoint_id).first()
     )
+    # Whether command-line/admin tooling is everyday work for this person (IT, security).
+    admin_ok = admin_ok_for(employee.department if employee is not None else None)
+    department = employee.department if employee is not None else None
+    adopted = adopted_actions(real, admin_ok, settings.ml_adopt_days) if adopts_habits(department) else frozenset()
     # Working hours the company entered win over everything: they are explicit.
     declared = (
         seed_baseline.shift_from_hours(employee.work_start, employee.work_end)
@@ -167,7 +202,7 @@ def train_endpoint(db, endpoint_id: int) -> Entry | None:
 
     def baseline(n_real: int) -> list[dict]:
         if declared is not None:
-            rows = auto_baseline.build(real, declared)
+            rows = auto_baseline.build(real, declared, department=department)
             keep = int(settings.ml_prior_rows * max(0.0, 1.0 - n_real / settings.ml_min_real_actions))
             source["name"] = "declared"
             return random.Random(endpoint_id).sample(rows, min(keep, len(rows)))
@@ -187,7 +222,7 @@ def train_endpoint(db, endpoint_id: int) -> Entry | None:
         if settings.ml_auto_baseline:
             shift = seed_baseline.SHIFTS.get(settings.ml_default_shift, seed_baseline.DAY)
             log.info("Endpoint %s: no baseline file, using an assumed %s-shift prior until it has its own history", endpoint_id, shift.name)
-            rows = auto_baseline.build(real, shift)
+            rows = auto_baseline.build(real, shift, department=department)
             # The prior fades out as the endpoint's own activity accumulates.
             keep = int(settings.ml_prior_rows * max(0.0, 1.0 - n_real / settings.ml_min_real_actions))
             source["name"] = "auto"
@@ -196,13 +231,15 @@ def train_endpoint(db, endpoint_id: int) -> Entry | None:
 
     try:
         rows, mode, excluded, real_actions = select_training_rows(
-            real, previous, baseline, previous_trusted=previous_entry.time_trusted if previous_entry else True
+            real, previous, baseline, previous_trusted=previous_entry.time_trusted if previous_entry else True,
+            admin_ok=admin_ok,
+            adopted=adopted,
         )
     except NoBaseline as exc:
         log.info("Endpoint %s: no model yet (%s)", endpoint_id, exc)
         return None
 
-    model = BehaviorModel().fit(rows)
+    model = BehaviorModel(admin_ok=admin_ok, adopted=adopted).fit(rows)
     entry = Entry(
         model=model,
         trained_at=datetime.now(timezone.utc),
@@ -212,6 +249,7 @@ def train_endpoint(db, endpoint_id: int) -> Entry | None:
         excluded=excluded,
         seconds=time.time() - started,
         baseline_source=source["name"],
+        adopted=adopted,
     )
     with _lock:
         _models[endpoint_id] = entry  # swapped in whole; readers never see a half-trained model

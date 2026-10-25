@@ -185,10 +185,12 @@ def load_db(
     if since is not None:
         query = query.filter(SE.event_time >= since)
     if user_actions_only:
-        query = query.filter(or_(SE.windows_event_id == "4688", SE.event_type.in_(_USER_EVENT_TYPES)))
+        query = query.filter(or_(SE.windows_event_id.in_(("4688", "4104")), SE.event_type.in_(_USER_EVENT_TYPES)))
 
     rows = []
     for t, level, etype, user, win_id, alert_id, process_path, creator, parent in query.order_by(SE.event_time).yield_per(5000):
         process = (process_path or "").rsplit("\\", 1)[-1]
+        if win_id == "4104":  # only commands a person typed are stored (see ingest._store)
+            creator = "user"
         rows.append(model_row(t, level, etype, user, win_id, process, creator, alert_id, parent))
     return rows

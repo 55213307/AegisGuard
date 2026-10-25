@@ -203,6 +203,7 @@ const EndpointDetail = (() => {
     document.getElementById("detailInfoList").innerHTML =
       rows.map(([label, value]) => `<div class="info-row"><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join("") +
       `<div class="info-row"><dt>Behavior Model</dt><dd>${escapeHtml(learningText(account))} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailRetrainBtn">Retrain Now</button>` : ""}</dd></div>` +
+      `<div class="info-row"><dt>Department</dt><dd>${escapeHtml(DEPARTMENT_LABEL[account.department] || DEPARTMENT_LABEL.auto)} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailDepartmentBtn">Change</button>` : ""}</dd></div>` +
       `<div class="info-row"><dt>Working Hours</dt><dd>${escapeHtml(hours)} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailHoursBtn">Edit</button>` : ""}</dd></div>`;
     renderLiveLine();
   }
@@ -286,6 +287,28 @@ const EndpointDetail = (() => {
 
   // Declare (or clear) the employee's working hours; the behavior model is retrained
   // right away, so it learns the new hours without waiting.
+  const DEPARTMENT_LABEL = { auto: "Auto (learn from activity)", office: "Office staff", it: "IT", security: "Security" };
+
+  // The department decides whether command prompts and admin tools are ordinary for
+  // this person; the behavior model is retrained straight away to match.
+  async function editDepartment() {
+    if (!account || !account.endpoint_name) return;
+    const answer = await Dialogs.choose({
+      title: "Department",
+      message: `Which department does ${account.employee_username} work in? Auto learns what is normal from the computer's own activity. IT and Security treat command prompts and admin tools as normal from day one; Office staff always flags them.`,
+      options: Object.entries(DEPARTMENT_LABEL).map(([value, label]) => ({ value, label })),
+      value: account.department || "auto",
+    });
+    if (answer === null || answer === account.department) return;
+    errorEl.textContent = "";
+    try {
+      render(await apiFetch(`/api/accounts/${account.id}/department`, { method: "PUT", body: { department: answer } }));
+      onChanged();
+    } catch (err) {
+      errorEl.textContent = err.message || "Could not change the department. Please try again.";
+    }
+  }
+
   const HOURS_PATTERN = /^(\d{1,2}:\d{2})\s*(?:-|\u2013|to)\s*(\d{1,2}:\d{2})$/i;
 
   async function editWorkHours() {
@@ -320,6 +343,7 @@ const EndpointDetail = (() => {
 
   document.getElementById("detailInfoList").addEventListener("click", (event) => {
     if (event.target.id === "detailHoursBtn") editWorkHours();
+    if (event.target.id === "detailDepartmentBtn") editDepartment();
     if (event.target.id === "detailRetrainBtn") retrainNow(event.target);
   });
 

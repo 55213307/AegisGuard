@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # Leave out real events the current model already flags as anomalous, so
     # an attack never becomes part of "normal".
     ml_exclude_flagged: bool = True
+    # A computer's own habit becomes normal for it: an admin tool (a command prompt, say)
+    # used on this many different days is learned instead of being flagged forever.
+    # Only for departments set to learn (see ml/features.DEPARTMENTS); 0 turns it off.
+    ml_adopt_days: int = 4
 
 
 settings = Settings()

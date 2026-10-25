@@ -205,7 +205,12 @@ createForm.addEventListener("submit", async (event) => {
   try {
     const created = await apiFetch("/api/accounts", {
       method: "POST",
-      body: { employee_username: username, employee_email: email, ...(workStart ? { work_start: workStart, work_end: workEnd } : {}) },
+      body: {
+        employee_username: username,
+        employee_email: email,
+        department: document.getElementById("newDepartment").value,
+        ...(workStart ? { work_start: workStart, work_end: workEnd } : {}),
+      },
     });
     closeCreateModal();
     showCreated(created);

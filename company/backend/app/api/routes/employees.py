@@ -13,6 +13,7 @@ from app.models.endpoint import Endpoint
 from app.models.removed_endpoint import RemovedEndpoint
 from app.models.security_event import SecurityEvent
 from app.schemas.employee import (
+    DepartmentRequest,
     EmployeeCreate,
     EmployeeListResponse,
     EmployeeOut,
@@ -169,6 +170,7 @@ def _to_out(
         overtime_until=employee.overtime_until if overtime.is_active(employee) else None,
         work_start=employee.work_start,
         work_end=employee.work_end,
+        department=employee.department,
         maintenance_from=endpoint.maintenance_from if endpoint else None,
         maintenance_until=endpoint.maintenance_until if endpoint else None,
         **_learning(endpoint),
@@ -224,6 +226,7 @@ def create_employee(
         employee_status=EmployeeStatus.ACTIVE,
         work_start=payload.work_start,
         work_end=payload.work_end,
+        department=payload.department,
     )
     db.add(employee)
     db.commit()
@@ -268,6 +271,23 @@ def end_overtime(
 ) -> EmployeeOut:
     employee = _get_employee_or_404(employee_id, principal, db)
     overtime.end(db, employee, principal.company_name)
+    return _to_out(employee, _agents_info([employee]))
+
+
+@router.put("/{employee_id}/department", response_model=EmployeeOut)
+def set_department(
+    employee_id: int,
+    payload: DepartmentRequest,
+    principal: Principal = Depends(require_password_changed),
+    db: Session = Depends(get_db),
+) -> EmployeeOut:
+    """Which department the employee works in. The behavior model is retrained
+    at once: what counts as ordinary (a command prompt, say) changes with it."""
+    employee = _get_employee_or_404(employee_id, principal, db)
+    employee.department = payload.department
+    db.commit()
+    if employee.endpoint is not None:
+        registry.retrain_soon(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
 
 

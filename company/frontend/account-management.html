@@ -100,6 +100,17 @@
       </div>
 
       <div class="form-field">
+        <label class="form-label" for="newDepartment">Department</label>
+        <select class="form-input" id="newDepartment" name="department">
+          <option value="auto">Auto (learn from activity)</option>
+          <option value="office">Office staff</option>
+          <option value="it">IT</option>
+          <option value="security">Security</option>
+        </select>
+        <p class="form-hint">Auto needs nothing from you: AegisGuard starts strict and learns what is normal for this computer from how it is used. Pick IT or Security to treat command prompts and admin tools as normal from day one, or Office staff to always flag them.</p>
+      </div>
+
+      <div class="form-field">
         <span class="form-label">Working Hours <span class="form-optional">(optional)</span></span>
         <div class="form-time-row">
           <input class="form-input" type="time" id="newWorkStart" name="work_start" aria-label="Start of the working day" />

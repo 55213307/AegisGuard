@@ -75,7 +75,18 @@ class Score:
 
 
 class BehaviorModel:
-    def __init__(self, n_estimators: int = 200, max_samples: int = 2048, random_state: int = 42) -> None:
+    def __init__(
+        self,
+        n_estimators: int = 200,
+        max_samples: int = 2048,
+        random_state: int = 42,
+        admin_ok: bool = False,
+        adopted: frozenset = frozenset(),
+    ) -> None:
+        # Whether admin tooling is ordinary for whoever this model is of (IT, security).
+        self.admin_ok = admin_ok
+        # Action keys of admin tools this computer has made a habit of (learned, not declared).
+        self.adopted = adopted
         self._n_estimators = n_estimators
         self._max_samples = max_samples
         self._random_state = random_state
@@ -113,7 +124,7 @@ class BehaviorModel:
         """Fit on the baseline rows: user actions are picked out, the rest
         ignored, and admin/maintenance tooling is left out of what counts as
         this user's normal behaviour."""
-        actions = [r for r in rows if is_user_action(r) and not is_admin_tool(r)]
+        actions = [r for r in rows if is_user_action(r) and (not is_admin_tool(r, self.admin_ok) or action_key(r) in self.adopted)]
         if not actions:
             raise ValueError("no user actions in the baseline to learn from")
         self._counts = Counter(action_key(r) for r in actions)
@@ -158,7 +169,9 @@ class BehaviorModel:
             behaviour = self._behaviour(float(raw))
             novelty = 0.0
             if self._counts.get(action_key(rows[i]), 0) == 0:
-                ordinary_program = rows[i]["windows_event_id"] == "4688" and not is_admin_tool(rows[i])
+                ordinary_program = rows[i]["windows_event_id"] == "4688" and (
+                    not is_admin_tool(rows[i], self.admin_ok) or action_key(rows[i]) in self.adopted
+                )
                 novelty = _NOVELTY_UNSEEN_PROGRAM if ordinary_program else _NOVELTY_UNSEEN
             risk = int(round(100 * (1 - (1 - behaviour) * (1 - novelty))))
             out[i] = Score(risk, behaviour, novelty, risk >= ANOMALY_RISK_THRESHOLD)

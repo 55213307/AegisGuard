@@ -54,6 +54,17 @@ button {
   cursor: pointer;
 }
 
+/* A dropdown's list is drawn by the browser: left alone it is white with this page's
+   near-white text on it, unreadable. Dark scheme + explicit colours keep it legible. */
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
 svg {
   display: block;
 }

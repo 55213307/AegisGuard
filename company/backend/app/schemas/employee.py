@@ -1,13 +1,19 @@
 import re
 from datetime import datetime
 
-from typing import Literal
-
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.models.employee import EmployeeStatus
+from app.services.ml.model import normalize_department
 
 _USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{3,50}$")
+
+
+def _known_department(value: str) -> str:
+    key = normalize_department(value)  # an earlier name (security) is the department it became (it)
+    if key is None:
+        raise ValueError("Unknown department.")
+    return key
 
 
 _CLOCK = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
@@ -26,11 +32,16 @@ class EmployeeCreate(BaseModel):
     # What the behavior model treats as ordinary: "auto" (the default) learns it from the
     # computer's own activity; IT and security staff use command prompts and admin tools
     # every day, clerks never do, and these can be declared up front.
-    department: Literal["auto", "office", "it", "security"] = "auto"
+    department: str = "auto"
     # Optional: the working hours, when the company already knows them. Left out,
     # the behavior model learns them from the computer's activity.
     work_start: str | None = None
     work_end: str | None = None
+
+    @field_validator("department")
+    @classmethod
+    def known_department(cls, value: str) -> str:
+        return _known_department(value)
 
     @field_validator("work_start", "work_end")
     @classmethod
@@ -94,6 +105,8 @@ class EmployeeOut(BaseModel):
     learning_state: str | None = None
     learning_actions: int | None = None
     learning_needed: int | None = None
+    # When that model was last trained: the progress above is only as fresh as this.
+    learning_trained_at: datetime | None = None
     # Highest behavioral risk score (0-100) of this computer's events in the
     # last 24 hours; None when it has none scored.
     risk_24h: int | None = None
@@ -107,7 +120,12 @@ class OvertimeRequest(BaseModel):
 
 
 class DepartmentRequest(BaseModel):
-    department: Literal["auto", "office", "it", "security"]
+    department: str
+
+    @field_validator("department")
+    @classmethod
+    def known_department(cls, value: str) -> str:
+        return _known_department(value)
 
 
 class WorkHoursRequest(BaseModel):

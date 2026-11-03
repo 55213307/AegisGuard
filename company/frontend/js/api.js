@@ -115,6 +115,19 @@ async function apiFetch(path, { method = "GET", body, skipAuthRedirect = false }
   return data;
 }
 
+// The departments an employee can be put in ({ key, label, hint }), fetched once:
+// the list lives on the server, so the portal never has its own copy to drift.
+let departmentsPromise = null;
+function getDepartments() {
+  if (!departmentsPromise) {
+    departmentsPromise = apiFetch("/api/accounts/departments").catch((err) => {
+      departmentsPromise = null; // try again next time
+      throw err;
+    });
+  }
+  return departmentsPromise;
+}
+
 // Downloads a file from an authenticated endpoint (a plain <a href> can't
 // send the Bearer token) and saves it under the server-provided filename.
 // Pass `body` to POST it as JSON (e.g. sending the page's own filtered rows

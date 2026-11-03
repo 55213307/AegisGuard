@@ -7,7 +7,7 @@ from app.db.session import get_db
 from app.models.endpoint import Endpoint
 from app.models.security_event import SecurityEvent
 from app.schemas.anomaly import AnomalyAlert, AnomalyFeed
-from app.services.ml.scoring import CRITICAL_RISK
+from app.services.ml.runtime import CRITICAL_RISK
 
 router = APIRouter(prefix="/api/anomalies", tags=["anomalies"])
 

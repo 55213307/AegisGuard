@@ -7,3 +7,9 @@ company/backend/.venv/
 company/backend/**/__pycache__/
 company/backend/.env
 **/.env.local-backup
+
+# logs, datasets (real events, kept outside the repo in Final Year Project/datasets), local databases
+*.log
+*.csv.gz
+datasets/
+company/backend/*.db

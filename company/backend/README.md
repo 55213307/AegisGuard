@@ -106,14 +106,13 @@ view open (`GET /api/accounts/{id}/screen?live=true`).
 
 **Windows Defender and the screen agent.** A script that captures the screen
 and uploads it is flagged by Defender's AMSI scanning and blocked on the
-endpoint. In a lab/demo the endpoint admin allows it with a path exclusion,
-run once on each endpoint **before** the installer:
-`Add-MpPreference -ExclusionPath "C:\Program Files\AegisGuard"`.
-This is a deliberate owner-authorized allow-list, not detection evasion. The
-installer does **not** add the exclusion itself: Defender tamper protection
-blocks exclusion changes from untrusted processes, and self-whitelisting is
-bad practice. In a real deployment this is instead solved by code-signing the
-agent and pushing it via MDM/group policy — manual AV exclusions don't scale.
+endpoint, so the installer adds a path exclusion for its own folder
+(`Add-MpPreference -ExclusionPath "C:\Program Files\AegisGuard"`) before it sets
+the agent up. It is best effort: if Windows tamper protection refuses, the
+installer prints the same command for an administrator to run by hand. This is
+a deliberate, owner-authorized allow-list of AegisGuard's own folder, not
+detection evasion. In a real deployment the agent would instead be
+code-signed and pushed via MDM/group policy — AV exclusions don't scale.
 
 Known gap: deleting a company in the admin panel removes its endpoint rows
 (ON DELETE CASCADE) but not their Wazuh agents.
@@ -138,13 +137,44 @@ The service user must be able to read `/var/ossec/logs/alerts/alerts.json`
 absent, so the ingester just idles (set `ALERTS_FILE_PATH` to a local file to
 exercise it).
 
+## Behavioral model
+
+Per-endpoint anomaly detection lives in `app/services/ml/`, four files that depend on each other in one
+direction (`model` ← `data` ← `runtime` ← `tools`):
+
+| file | what it is |
+|---|---|
+| `model.py` | the model itself, no database: the departments an employee can be in, the features an event is turned into (time of day, rarity, recent activity, parent/child pairs), and `BehaviorModel` (Isolation Forest + rules + learned command-line profiles) |
+| `data.py` | where the model's data comes from: loaders for the database and for dataset files, the automatic first baseline, the synthetic baseline (`seed`) |
+| `runtime.py` | what runs inside the backend: the models, kept **in memory only** (a restart retrains them), the thread that (re)trains them, and the scoring of new events (`risk_score`, `risk_reason`) |
+| `tools.py` | offline commands, never run by the backend |
+
+Offline commands (from `company/backend`; on the server use `.venv/bin/python`):
+
+```
+python -m app.services.ml.tools train     --csv file.csv.gz | --endpoint-id N
+python -m app.services.ml.tools evaluate  [--csv file]                 # held-out time + injected anomalies
+python -m app.services.ml.tools ablation  [--csv file] [--out r.md]    # rules vs forest vs both
+python -m app.services.ml.tools export    --endpoint-id N --out f.csv.gz   # real events as a dataset
+python -m app.services.ml.tools seed      --endpoint-id N --out f.csv.gz   # synthetic baseline
+```
+
+Dataset files are kept outside the repository, in `Final Year Project/datasets/` (see the README there);
+`tools` reads `datasets/dataset.csv.gz` when no `--csv` is given. Thresholds and schedules are settings
+(`ML_*` in `app/core/config.py`).
+
 ## Structure
 
 ```
 app/
   core/       settings (.env) and JWT/password helpers
   db/         SQLAlchemy engine/session
-  models/     Employee (owned here); Customer, Account (subset of the admin-owned tables)
+  models/     Employee, Endpoint, SecurityEvent, LockEvent, RemovedEndpoint (owned here);
+              Customer, Account (subset of the admin-owned tables)
   schemas/    Pydantic request/response models
   api/        auth dependencies and routes
+  services/   Wazuh client, alert ingestion and parsing, installer builder, screen frames, endpoint
+              lock, overtime, PDF report, platform status
+    ml/       the behavioral model (above)
+deploy/       deploy script, systemd unit, nginx config, Wazuh rules (company/deploy)
 ```

@@ -22,9 +22,9 @@ from app.schemas.employee import (
     SecurityEventListResponse,
 )
 from app.services import endpoint_lock, overtime, screens, wazuh
-from app.services.ml import registry
-from app.services.ml.model import ANOMALY_RISK_THRESHOLD, EXPLAIN_RISK_FROM
-from app.services.ml.scoring import CRITICAL_RISK
+from app.services.ml import runtime
+from app.services.ml.model import EXPLAIN_RISK_FROM, department_catalog
+from app.services.ml.runtime import CRITICAL_RISK
 from app.services.installer import build_installer
 
 # Served as "accounts" because that's what the portal's Account Management
@@ -126,10 +126,15 @@ def _risk_24h(db: Session, employees: list[Employee]) -> dict[int, tuple[int | N
 
 
 def _learning(endpoint) -> dict:
-    progress = registry.learning_progress(endpoint.id) if endpoint else None
+    progress = runtime.learning_progress(endpoint.id) if endpoint else None
     if progress is None:
         return {}
-    return {"learning_state": progress["state"], "learning_actions": progress["actions"], "learning_needed": progress["needed"]}
+    return {
+        "learning_state": progress["state"],
+        "learning_actions": progress["actions"],
+        "learning_needed": progress["needed"],
+        "learning_trained_at": progress["trained_at"],
+    }
 
 
 def _to_out(
@@ -203,6 +208,14 @@ def list_employees(
     agents_info = _agents_info(employees)
     risk = _risk_24h(db, employees)
     return EmployeeListResponse(total=len(employees), items=[_to_out(e, agents_info, risk) for e in employees])
+
+
+@router.get("/departments")
+def list_departments(principal: Principal = Depends(require_password_changed)) -> list[dict]:
+    """The departments an employee can be put in (key, label and what the choice
+    means), for the Create Account form and the endpoint detail. Declared before
+    "/{employee_id}" so that path isn't taken for an id."""
+    return department_catalog()
 
 
 @router.post("", response_model=EmployeeOut, status_code=201)
@@ -287,7 +300,7 @@ def set_department(
     employee.department = payload.department
     db.commit()
     if employee.endpoint is not None:
-        registry.retrain_soon(employee.endpoint.id)
+        runtime.retrain_soon(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
 
 
@@ -304,7 +317,7 @@ def set_work_hours(
     employee.work_start, employee.work_end = payload.start, payload.end
     db.commit()
     if employee.endpoint is not None:
-        registry.retrain_soon(employee.endpoint.id)
+        runtime.retrain_soon(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
 
 
@@ -317,7 +330,7 @@ def clear_work_hours(
     employee.work_start = employee.work_end = None
     db.commit()
     if employee.endpoint is not None:
-        registry.retrain_soon(employee.endpoint.id)
+        runtime.retrain_soon(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
 
 
@@ -340,7 +353,7 @@ def retrain_now(
         now = time.time()
         if now - _last_retrain_request.get(employee.endpoint.id, 0.0) >= RETRAIN_COOLDOWN_SECONDS:
             _last_retrain_request[employee.endpoint.id] = now
-            registry.retrain_soon(employee.endpoint.id)
+            runtime.retrain_soon(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
 
 

@@ -20,8 +20,8 @@ from app.models.endpoint import Endpoint
 from app.models.security_event import SecurityEvent
 from app.services.alerts import agent_id_of, parse_alert
 from app.services import endpoint_lock, health, overtime
-from app.services.ml import registry, scoring
-from app.services.ml.dataset import powershell_command
+from app.services.ml import runtime
+from app.services.ml.data import powershell_command
 
 log = logging.getLogger("aegisguard.ingest")
 
@@ -98,13 +98,14 @@ def _store(db, lines: list[bytes], agents: dict[str, tuple[int, int]]) -> int:
     # While an installer is working on a computer its events aren't judged.
     judged = _outside_maintenance(rows, endpoint_lock.maintenance_windows(db, {r["endpoint_id"] for r in rows}))
     try:
-        scoring.apply(
+        runtime.apply(
             judged,
-            registry.get_model,
-            scoring.failed_logon_counter(db, judged),
+            runtime.get_model,
+            runtime.failed_logon_counter(db, judged),
             overtime.windows(db, {r["endpoint_id"] for r in judged}),
             # Endpoints whose working hours the model hasn't learned yet aren't judged on the hour.
-            {r["endpoint_id"] for r in judged if registry.time_trusted(r["endpoint_id"]) is False},
+            {r["endpoint_id"] for r in judged if runtime.time_trusted(r["endpoint_id"]) is False},
+            runtime.history_loader(db),
         )
     except Exception:  # a scoring problem must never cost us the alerts themselves
         log.exception("Scoring new events failed; storing them unscored")

@@ -27,7 +27,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.schemas.dashboard import ServiceStatus
 from app.services import health, ingest, wazuh
-from app.services.ml import registry
+from app.services.ml import runtime
 
 _STARTED = datetime.now(timezone.utc)
 
@@ -124,18 +124,18 @@ def behavior_model(endpoints: list[tuple[int, datetime]], now: datetime | None =
     now = now or datetime.now(timezone.utc)
     if not settings.ml_enabled:
         return ServiceStatus(status="unknown", label="Disabled", detail="ML_ENABLED is off")
-    if not registry.is_running():
+    if not runtime.is_running():
         return ServiceStatus(status="down", label="Stopped", detail="The model trainer is not running")
     problem = health.recent_error("ml", now)
     if problem:
         return ServiceStatus(status="warn", label="Errors", detail=problem)
     if not endpoints:
         return ServiceStatus(status="ok", label="Idle", detail="No computers enrolled yet")
-    models = registry.status()
+    models = runtime.status()
     # The models are in memory, so after a restart or deploy every computer has none
     # until the trainer gets to it: the grace period starts at the later of the
     # computer's enrolment and the trainer's start.
-    started = registry.started_at()
+    started = runtime.started_at()
     without = [
         eid for eid, enrolled in endpoints
         if eid not in models and now - (max(enrolled, started) if started else enrolled) > MODEL_GRACE

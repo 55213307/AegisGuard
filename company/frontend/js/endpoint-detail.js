@@ -105,7 +105,8 @@ const EndpointDetail = (() => {
     if (!a.endpoint_name) return "—";
     if (!a.learning_state) return "Not trained yet";
     if (a.learning_state === "learned") return "Learned from this computer";
-    return `Learning · ${a.learning_actions} of ${a.learning_needed} actions`;
+    const trained = a.learning_trained_at ? ` · trained ${timeAgo(a.learning_trained_at).toLowerCase()}` : "";
+    return `Learning · ${a.learning_actions} of ${a.learning_needed} actions${trained}`;
   }
 
   function riskText(score) {
@@ -203,7 +204,7 @@ const EndpointDetail = (() => {
     document.getElementById("detailInfoList").innerHTML =
       rows.map(([label, value]) => `<div class="info-row"><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join("") +
       `<div class="info-row"><dt>Behavior Model</dt><dd>${escapeHtml(learningText(account))} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailRetrainBtn">Retrain Now</button>` : ""}</dd></div>` +
-      `<div class="info-row"><dt>Department</dt><dd>${escapeHtml(DEPARTMENT_LABEL[account.department] || DEPARTMENT_LABEL.auto)} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailDepartmentBtn">Change</button>` : ""}</dd></div>` +
+      `<div class="info-row"><dt>Department</dt><dd>${escapeHtml(departmentLabel(account.department))} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailDepartmentBtn">Change</button>` : ""}</dd></div>` +
       `<div class="info-row"><dt>Working Hours</dt><dd>${escapeHtml(hours)} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailHoursBtn">Edit</button>` : ""}</dd></div>`;
     renderLiveLine();
   }
@@ -287,17 +288,32 @@ const EndpointDetail = (() => {
 
   // Declare (or clear) the employee's working hours; the behavior model is retrained
   // right away, so it learns the new hours without waiting.
-  const DEPARTMENT_LABEL = { auto: "Auto (learn from activity)", office: "Office staff", it: "IT", security: "Security" };
+  // key -> label, from the server's list (see getDepartments in api.js).
+  let departmentLabels = {};
+  getDepartments()
+    .then((list) => {
+      departmentLabels = Object.fromEntries(list.map((d) => [d.key, d.label]));
+      if (account) render(account);
+    })
+    .catch(() => {});
+  const departmentLabel = (key) => departmentLabels[key] || (key === "security" ? departmentLabels.it : null) || key || "Auto";
 
   // The department decides whether command prompts and admin tools are ordinary for
   // this person; the behavior model is retrained straight away to match.
   async function editDepartment() {
     if (!account || !account.endpoint_name) return;
+    let list;
+    try {
+      list = await getDepartments();
+    } catch (err) {
+      errorEl.textContent = err.message || "Could not load the departments. Please try again.";
+      return;
+    }
     const answer = await Dialogs.choose({
       title: "Department",
-      message: `Which department does ${account.employee_username} work in? Auto learns what is normal from the computer's own activity. IT and Security treat command prompts and admin tools as normal from day one; Office staff always flags them.`,
-      options: Object.entries(DEPARTMENT_LABEL).map(([value, label]) => ({ value, label })),
-      value: account.department || "auto",
+      message: `Which department does ${account.employee_username} work in? This only sets where AegisGuard starts: the computer's own activity takes over as it is used. Auto needs no choice at all.`,
+      options: list.map((d) => ({ value: d.key, label: d.label })),
+      value: list.some((d) => d.key === account.department) ? account.department : "auto",
     });
     if (answer === null || answer === account.department) return;
     errorEl.textContent = "";
@@ -354,10 +370,31 @@ const EndpointDetail = (() => {
     button.disabled = true;
     button.textContent = "Retraining…";
     try {
+      const before = account.learning_trained_at;
       await apiFetch(`/api/accounts/${account.id}/retrain`, { method: "POST" });
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      render(await apiFetch(`/api/accounts/${account.id}`));
-      onChanged();
+      // Training runs on the server and takes a while (it reads the computer's recent
+      // history and fits a model), so wait for the model to actually be replaced
+      // instead of showing the old number after a fixed pause.
+      let fresh = null;
+      for (let waited = 0; waited < 90000; waited += 2500) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const next = await apiFetch(`/api/accounts/${account.id}`);
+        if (next.learning_trained_at && next.learning_trained_at !== before) {
+          fresh = next;
+          break;
+        }
+      }
+      if (fresh) {
+        render(fresh);
+        onChanged();
+      } else {
+        button.disabled = false;
+        button.textContent = "Retrain Now";
+        await Dialogs.notice({
+          title: "The model has not been retrained",
+          message: "Nothing new came back after 90 seconds. Training may have failed or there may not be enough activity yet; the server log has the reason.",
+        });
+      }
     } catch (err) {
       errorEl.textContent = err.message || "Could not retrain the model. Please try again.";
       button.disabled = false;

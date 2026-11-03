@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import agent, anomalies, auth, dashboard, employees, security_logs
 from app.core.config import settings
 from app.services import health, ingest
-from app.services.ml import registry as ml_registry
+from app.services.ml import runtime as ml_runtime
 
 # uvicorn only sets up logging for its own loggers, so without this the
 # background workers' INFO lines (ingestion, model training) never reach the
@@ -23,11 +23,11 @@ _app_log.setLevel(logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ingest.start()
-    ml_registry.start()
+    ml_runtime.start()
     try:
         yield
     finally:
-        ml_registry.stop()
+        ml_runtime.stop()
         ingest.stop()
 
 

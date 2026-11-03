@@ -586,6 +586,15 @@ h2,
   outline: none;
 }
 
+select.ag-dialog-input {
+  color-scheme: dark;
+}
+
+select.ag-dialog-input option {
+  background: #1b1f2a;
+  color: var(--text-primary);
+}
+
 .ag-dialog-input:focus {
   border-color: var(--link-blue);
 }

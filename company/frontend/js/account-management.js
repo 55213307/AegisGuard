@@ -157,6 +157,21 @@ document.getElementById("closeCreatedBtn").addEventListener("click", () => {
 /* Create Account dialog */
 const createScrim = document.getElementById("createAccountScrim");
 const createForm = document.getElementById("createAccountForm");
+
+// The department list comes from the server; until it arrives the form still has Auto.
+const departmentSelect = document.getElementById("newDepartment");
+const departmentHint = document.getElementById("newDepartmentHint");
+getDepartments()
+  .then((list) => {
+    departmentSelect.innerHTML = list.map((d) => `<option value="${escapeHtml(d.key)}">${escapeHtml(d.label)}</option>`).join("");
+    const showHint = () => {
+      const chosen = list.find((d) => d.key === departmentSelect.value);
+      if (chosen) departmentHint.textContent = chosen.hint;
+    };
+    departmentSelect.addEventListener("change", showHint);
+    showHint();
+  })
+  .catch(() => {});
 const createError = document.getElementById("createAccountError");
 
 function openCreateModal() {

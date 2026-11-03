@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     alerts_file_path: str = "/var/ossec/logs/alerts/alerts.json"
     ingest_poll_seconds: float = 2.0
 
-    # Behavioral anomaly model (app/services/ml/registry.py): one Isolation
+    # Behavioral anomaly model (app/services/ml/runtime.py): one Isolation
     # Forest per endpoint, trained at start-up and then retrained on a schedule
     # so it keeps following the user's behavior.
     ml_enabled: bool = True
@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     # used on this many different days is learned instead of being flagged forever.
     # Only for departments set to learn (see ml/features.DEPARTMENTS); 0 turns it off.
     ml_adopt_days: int = 4
+    # The command line is only judged once this many baseline actions carry one, and a
+    # program only once it has this many of its own (see ml/model.py). Lower them to see it
+    # work on a computer with little history; the defaults keep a young model from guessing.
+    ml_min_command_evidence: int = 500
+    ml_min_program_commands: int = 20
 
 
 settings = Settings()

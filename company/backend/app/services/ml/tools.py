@@ -1,10 +1,12 @@
-"""Offline tools for the model: nothing here runs inside the backend.
+"""Offline tools for the model. The backend runs none of the commands; it uses only evaluate_split (the 80/20
+test), through retrain.py, which is what the portal's Retrain Now button runs.
 
   python -m app.services.ml.tools train      --csv file.csv.gz | --endpoint-id N [--real-only]
   python -m app.services.ml.tools evaluate   [--csv file] [--train-share 0.8]
   python -m app.services.ml.tools ablation   [--csv file] [--instances 40] [--out results.md]
   python -m app.services.ml.tools export     --endpoint-id N --out file.csv.gz
   python -m app.services.ml.tools seed       --endpoint-id N [--shift day] (--out file | --write | --delete)
+  python -m app.services.ml.tools demo-history --endpoint-id N [--actions 2200] [--days 21] [--write | --delete]
 
 Run from company/backend (on the server: with .venv/bin/python). With no command, 'evaluate' runs.
 """
@@ -15,6 +17,7 @@ import argparse
 import csv
 import gzip
 import json
+import os
 import random
 import sys
 import time
@@ -23,10 +26,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
-from sklearn.metrics import confusion_matrix, roc_auc_score
+from sklearn.decomposition import PCA
+from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
+from sklearn.preprocessing import StandardScaler
 
 if __package__ in (None, ""):  # run as a plain file (e.g. VS Code's Run button): make `app` importable
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    _backend = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(_backend))
+    os.chdir(_backend)  # the settings read .env from the current folder
 
 from app.services.ml.data import (
     NotEnoughEvents,
@@ -36,7 +43,9 @@ from app.services.ml.data import (
     _is_person,
     _process_name,
     build_rows,
+    delete_demo,
     delete_seed,
+    demo_plan,
     load_csv,
     load_db,
     load_templates,
@@ -195,28 +204,43 @@ def inject_anomalies(train: list[dict], test_start: datetime, test_end: datetime
     unseen = [t for t in _UNSEEN_TOOLS if f"proc:{t}" not in seen]
     span = (test_end - test_start).total_seconds()
 
+    class NoMoment(Exception):
+        """The test period has no moment of that kind (no weekend in a few days of test data)."""
+
     def moment(weekday_only=False, weekend_only=False, hours=range(24)) -> datetime:
-        while True:
+        for _ in range(5000):
             t = test_start + timedelta(seconds=rng.uniform(0, span))
             local = t.astimezone(LOCAL_TZ)
             if local.hour not in hours or (weekday_only and local.weekday() >= 5) or (weekend_only and local.weekday() < 5):
                 continue
             return t
+        raise NoMoment
 
-    day, night = range(8, 19), (22, 23, 0, 1, 2, 3, 4, 5)
+    # "Off-hours" is whatever hours this computer is hardly ever active in (under 1% of its
+    # actions each), so the scenarios fit a day-shift computer as well as a night-shift one.
+    by_hour = Counter(local_hour(r["event_time"]) for r in train)
+    quiet = [h for h in range(24) if by_hour[h] / max(len(train), 1) < 0.01]
+    quiet = quiet or sorted(range(24), key=lambda h: by_hour[h])[:6]
     kinds: list[tuple[str, callable]] = [
-        ("daytime activity (usual programs, 08-19h weekday)", lambda: _event(moment(True, hours=day), "Process", rng.choice(usual))),
-        ("weekend daytime logon", lambda: _event(moment(weekend_only=True, hours=range(9, 21)), "Login Success")),
-        ("privileged logon off-hours", lambda: _event(moment(hours=range(8, 19)), "Special Privileges")),
+        ("usual programs in the quiet hours", lambda: _event(moment(hours=quiet), "Process", rng.choice(usual))),
+        ("weekend logon in the quiet hours", lambda: _event(moment(weekend_only=True, hours=quiet), "Login Success")),
+        ("privileged logon in the quiet hours", lambda: _event(moment(hours=quiet), "Special Privileges")),
     ]
     if unseen:
-        kinds.append(("never-seen admin tool at night", lambda: _event(moment(hours=night), "Process", rng.choice(unseen))))
-    return [(name, make()) for name, make in kinds for _ in range(per_kind)]
+        kinds.append(("never-seen admin tool in the quiet hours", lambda: _event(moment(hours=quiet), "Process", rng.choice(unseen))))
+    injected = []
+    for name, make in kinds:
+        try:
+            injected += [(name, make()) for _ in range(per_kind)]
+        except NoMoment:  # this kind cannot happen in the test period: leave it out
+            continue
+    return injected
 
 
-def _score(model: BehaviorModel, rows: list[dict], desc: str, chunk: int = 500) -> np.ndarray:
+def _score(model: BehaviorModel, rows: list[dict], desc: str, chunk: int = 500, show: bool = True) -> np.ndarray:
     out = []
-    for i in progress(range(0, len(rows), chunk), desc=desc, unit=" chunk"):
+    steps = range(0, len(rows), chunk)
+    for i in progress(steps, desc=desc, unit=" chunk") if show else steps:
         out.extend(s.risk for s in model.score_many(rows[i : i + chunk]))
     return np.asarray(out)
 
@@ -234,53 +258,130 @@ def _evaluate_metrics(y: np.ndarray, risk: np.ndarray, threshold: int) -> dict:
     }  # fmt: skip
 
 
-def evaluate(rows: list[dict], train_share: float = 0.8) -> None:
-    actions = sorted((r for r in rows if is_user_action(r)), key=lambda r: r["event_time"])
+MAX_EVALUATION_ROWS = 40_000  # the newest ones: keeps a manual retrain quick on a big history
+MIN_EVALUATION_ROWS = 100  # fewer training events than this and a test means nothing
+SCATTER_NORMALS = 2000  # normal events drawn in the scatter plot (all the anomalies are)
+
+
+def _thin(values, n: int = 60) -> list[float]:
+    """At most n evenly spaced values of a curve (the reports only need its shape)."""
+    values = np.asarray(values, dtype=float)
+    if len(values) <= n:
+        return [round(float(v), 4) for v in values]
+    return [round(float(v), 4) for v in values[np.linspace(0, len(values) - 1, n).astype(int)]]
+
+
+def evaluate_split(rows: list[dict], make_model=BehaviorModel, train_share: float = 0.8) -> dict:
+    """The standard test, on any set of events: train on the oldest `train_share` (80%) of the
+    user actions, hold the newest rest back as the test set, add injected anomalies (label 1)
+    to it, and compare the model's alerts with the labels. `make_model()` returns an unfitted
+    BehaviorModel. Returns a JSON-friendly report (print_report writes it out), or
+    {"error": ...} when there are too few events to hold any back."""
+    actions = sorted((dict(r) for r in rows if is_user_action(r)), key=lambda r: r["event_time"])[-MAX_EVALUATION_ROWS:]
     cut = int(len(actions) * train_share)
     train, test_normal = actions[:cut], actions[cut:]
-    t0, t1 = train[0]["event_time"], test_normal[-1]["event_time"]
-    split = test_normal[0]["event_time"]
-    print(f"user actions : {len(actions):,}   ({t0:%Y-%m-%d} .. {t1:%Y-%m-%d})")
-    print(f"train (past) : {len(train):,}   up to {split:%Y-%m-%d}")
-    print(f"test normal  : {len(test_normal):,}   {split:%Y-%m-%d} .. {t1:%Y-%m-%d}")
+    if len(train) < MIN_EVALUATION_ROWS or len(test_normal) < 20:
+        return {"error": f"Only {len(actions)} user actions: too few to hold 20% back as a test."}
+    split, end = test_normal[0]["event_time"], test_normal[-1]["event_time"]
 
     started = time.time()
-    model = BehaviorModel().fit(train)
-    print(f"model        : Isolation Forest, 200 trees, trained in {time.time() - started:.1f}s\n")
+    model = make_model().fit(train)
+    seconds = time.time() - started
 
-    per_kind = max(100, len(test_normal) // 100)
-    injected = inject_anomalies(train, split, t1, per_kind)
+    injected = inject_anomalies(train, split, end, max(10, len(test_normal) // 100))
     rows_all = test_normal + [r for _, r in injected]
     # The model judges an event by what came just before it, so the test rows need that too
     # (normal ones from the normal timeline, each injected one from the activity around it).
     _add_test_context(test_normal, [(k, i, [r]) for i, (k, r) in enumerate(injected)])
     y = np.array([0] * len(test_normal) + [1] * len(injected))
-    kind = ["normal"] * len(test_normal) + [k for k, _ in injected]
-    print(f"test set     : {len(test_normal):,} normal + {len(injected):,} injected anomalies "
-          f"({len(injected) / len(rows_all) * 100:.1f}%, {len({k for k, _ in injected})} kinds)\n")  # fmt: skip
+    kind = np.array(["normal"] * len(test_normal) + [k for k, _ in injected])
+    risk = _score(model, rows_all, "Scoring test set", show=False)
 
-    risk = _score(model, rows_all, "Scoring test set")
     m = _evaluate_metrics(y, risk, ANOMALY_RISK_THRESHOLD)
+    fpr, tpr, _ = roc_curve(y, risk)
+    precision, recall, _ = precision_recall_curve(y, risk)
+    edges = list(range(0, 105, 5))
 
-    print(f"\n=== Results at alert threshold risk >= {ANOMALY_RISK_THRESHOLD} ===")
+    # The model's own features squeezed into two dimensions (PCA fitted on the training events).
+    x_train = np.asarray([model._vector(r) for r in train], dtype=float)  # noqa: SLF001
+    x_test = np.asarray([model._vector(r) for r in rows_all], dtype=float)  # noqa: SLF001
+    scaler = StandardScaler().fit(x_train)
+    pca = PCA(n_components=2, random_state=42).fit(scaler.transform(x_train))
+    points = pca.transform(scaler.transform(x_test))
+    rng = np.random.default_rng(42)
+    normals = np.flatnonzero(y == 0)
+    keep = np.concatenate([rng.permutation(normals)[:SCATTER_NORMALS], np.flatnonzero(y == 1)])
+
+    return {
+        "train_share": train_share,
+        "actions": len(actions),
+        "train": len(train),
+        "test_normal": len(test_normal),
+        "injected": len(injected),
+        "from": train[0]["event_time"].isoformat(),
+        "split": split.isoformat(),
+        "to": end.isoformat(),
+        "seconds": round(seconds, 1),
+        "threshold": ANOMALY_RISK_THRESHOLD,
+        "confusion": {k: int(m[k]) for k in ("tn", "fp", "fn", "tp")},
+        "metrics": {k: float(m[k]) for k in ("accuracy", "precision", "recall", "f1", "fpr")}
+        | {"auc": float(roc_auc_score(y, risk))},
+        "kinds": [
+            {
+                "name": name,
+                "count": int((kind == name).sum()),
+                "caught": float(np.mean(risk[kind == name] >= ANOMALY_RISK_THRESHOLD)),
+                "median_risk": float(np.median(risk[kind == name])),
+            }
+            for name in dict.fromkeys(k for k, _ in injected)
+        ],
+        "sweep": [{"threshold": th} | {k: float(v) for k, v in _evaluate_metrics(y, risk, th).items() if k in ("precision", "recall", "f1", "fpr")} for th in (40, 50, 60, 70, 80, 90)],
+        "roc": {"fpr": _thin(fpr), "tpr": _thin(tpr)},
+        "pr": {"precision": _thin(precision), "recall": _thin(recall)},
+        "histogram": {
+            "edges": edges,
+            "normal": np.histogram(risk[y == 0], bins=edges)[0].tolist(),
+            "anomaly": np.histogram(risk[y == 1], bins=edges)[0].tolist(),
+        },
+        "scatter": {
+            "x": [round(float(v), 3) for v in points[keep, 0]],
+            "y": [round(float(v), 3) for v in points[keep, 1]],
+            "anomaly": [int(v) for v in y[keep]],
+            "alarm": [int(v >= ANOMALY_RISK_THRESHOLD) for v in risk[keep]],
+            "kept": round(float(pca.explained_variance_ratio_.sum()), 3),
+        },
+        "note": "The anomalies are synthetic: written by the authors and injected into the held-out period.",
+    }
+
+
+def print_report(report: dict) -> None:
+    if "error" in report:
+        print(report["error"])
+        return
+    c, m = report["confusion"], report["metrics"]
+    day = lambda iso: iso[:10]  # noqa: E731
+    print(f"user actions : {report['actions']:,}   ({day(report['from'])} .. {day(report['to'])})")
+    print(f"train ({report['train_share']:.0%})  : {report['train']:,}   up to {day(report['split'])}   (trained in {report['seconds']}s)")
+    print(f"test normal  : {report['test_normal']:,}   {day(report['split'])} .. {day(report['to'])}")
+    print(f"test anomalies: {report['injected']:,} injected ({len(report['kinds'])} kinds)\n")
+    print(f"=== Results at alert threshold risk >= {report['threshold']} ===")
     print("confusion matrix            predicted normal   predicted anomaly")
-    print(f"  actual normal             {m['tn']:>16,} {m['fp']:>19,}")
-    print(f"  actual anomaly            {m['fn']:>16,} {m['tp']:>19,}")
-    print(f"accuracy  {m['accuracy'] * 100:6.2f}%   precision {m['precision'] * 100:6.2f}%   recall {m['recall'] * 100:6.2f}%   "
-          f"F1 {m['f1'] * 100:6.2f}%")  # fmt: skip
-    print(f"false-positive rate {m['fpr'] * 100:.2f}%   ROC-AUC {roc_auc_score(y, risk):.4f}")
-
+    print(f"  actual normal             {c['tn']:>16,} {c['fp']:>19,}")
+    print(f"  actual anomaly            {c['fn']:>16,} {c['tp']:>19,}")
+    print(f"accuracy  {m['accuracy'] * 100:6.2f}%   precision {m['precision'] * 100:6.2f}%   recall {m['recall'] * 100:6.2f}%   F1 {m['f1'] * 100:6.2f}%")
+    print(f"false-positive rate {m['fpr'] * 100:.2f}%   ROC-AUC {m['auc']:.4f}")
     print("\ndetection by kind of anomaly (recall at the threshold, median risk):")
-    for name in dict.fromkeys(k for k, _ in injected):
-        mask = np.array([k == name for k in kind])
-        print(f"  {name:<52} caught {np.mean(risk[mask] >= ANOMALY_RISK_THRESHOLD) * 100:5.1f}%   median risk {np.median(risk[mask]):.0f}")
-
+    for k in report["kinds"]:
+        print(f"  {k['name']:<52} caught {k['caught'] * 100:5.1f}%   median risk {k['median_risk']:.0f}")
     print("\nthreshold sweep:")
     print(f"  {'risk >=':<8} {'precision':>9} {'recall':>8} {'F1':>7} {'false-pos rate':>15}")
-    for th in (40, 50, 60, 70, 80, 90):
-        s = _evaluate_metrics(y, risk, th)
-        print(f"  {th:<8} {s['precision'] * 100:>8.1f}% {s['recall'] * 100:>7.1f}% {s['f1'] * 100:>6.1f}% {s['fpr'] * 100:>14.2f}%")
-    print("\nNote: anomalies are synthetic, injected into held-out time; normal rows are the real (replayed) logs' future.")
+    for s in report["sweep"]:
+        print(f"  {s['threshold']:<8} {s['precision'] * 100:>8.1f}% {s['recall'] * 100:>7.1f}% {s['f1'] * 100:>6.1f}% {s['fpr'] * 100:>14.2f}%")
+    print(f"\nNote: {report['note']} Normal rows are the real (or replayed) events of the held-out period.")
+
+
+def evaluate(rows: list[dict], train_share: float = 0.8) -> None:
+    print_report(evaluate_split(rows, BehaviorModel, train_share))
 
 
 def _evaluate_main() -> None:
@@ -756,7 +857,65 @@ def _seed_main() -> None:
 # the command line
 # ======================================================================================
 
+def _demo_history_main() -> None:
+    """For a demo: store about 2,000 of the user's own actions, spread over the last weeks, as if
+    the computer had been monitored all that time (so it counts as learned straight away).
+
+    The actions are the programs, logons and logoffs this computer really produced (the real events
+    are the templates), put on the working days inside the working hours. They are stored like
+    collected events; only details["demo"] marks them, so --delete can take them out again."""
+    parser = argparse.ArgumentParser(description="Store a few weeks of this computer's typical activity (for a demo).")
+    parser.add_argument("--endpoint-id", type=int, required=True)
+    parser.add_argument("--actions", type=int, default=2200, help="user actions to create (default 2200: a margin over the 2000 needed)")
+    parser.add_argument("--days", type=int, default=21, help="how many days back (default 21: more than the 14 needed)")
+    parser.add_argument("--hours", help="working hours HH:MM-HH:MM (default: the employee's declared hours, else 09:00-18:00)")
+    parser.add_argument("--seed", type=int, default=2026)
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--write", action="store_true", help="store the rows")
+    action.add_argument("--delete", action="store_true", help="remove the rows this command stored")
+    args = parser.parse_args()
+
+    from app.db.session import SessionLocal
+    from app.models.employee import Employee
+    from app.models.endpoint import Endpoint
+
+    db = SessionLocal()
+    endpoint = db.get(Endpoint, args.endpoint_id)
+    if endpoint is None:
+        raise SystemExit(f"No endpoint with id {args.endpoint_id}.")
+    if args.delete:
+        print(f"Deleted {delete_demo(db, endpoint.id):,} demo rows of endpoint {endpoint.id}.")
+        return
+
+    employee = db.get(Employee, endpoint.employee_id)
+    span = args.hours or (
+        f"{employee.work_start}-{employee.work_end}" if employee is not None and employee.work_start and employee.work_end else "09:00-18:00"
+    )
+    try:
+        start, end = (datetime.strptime(p.strip(), "%H:%M").time() for p in span.split("-"))
+    except ValueError:
+        raise SystemExit(f"--hours must look like 09:00-18:00, not {span!r}.")
+    try:
+        templates = load_templates(db, endpoint.id)
+    except NotEnoughEvents as exc:
+        raise SystemExit(str(exc))
+
+    plan = demo_plan(templates, args.actions, args.days, (start, end), seed=args.seed)
+    kinds = Counter("logon/logoff" if tpl["event_type"] in ("Login Success", "Logoff") else _process_name(tpl["details"]) for _, tpl in plan)
+    print(f"templates : {len(templates.session)} session processes, {len(templates.logons)} logons, {len(templates.logoffs)} logoffs "
+          f"(from {templates.real_rows:,} real events)")  # fmt: skip
+    print(f"plan      : {len(plan):,} actions, {plan[0][0]:%Y-%m-%d} .. {plan[-1][0]:%Y-%m-%d}, working hours {span}")
+    print("programs  : " + ", ".join(f"{k}={v}" for k, v in kinds.most_common(12)))
+    if not args.write:
+        print("\nPreview only, nothing written. Add --write to store these rows (--delete removes them again).")
+        return
+    inserted = write_seed(db, endpoint.id, endpoint.unique_id, build_rows(plan, endpoint.id, seed=args.seed, demo=True),
+                          total=len(plan), replace=False)  # fmt: skip
+    print(f"\nStored {inserted:,} actions for endpoint {endpoint.id}. Retrain Now (or wait for the next round) to learn from them.")
+
+
 COMMANDS = {
+    "demo-history": (_demo_history_main, "store a few weeks of typical activity so a demo computer counts as learned"),
     "train": (_train_main, "train a model on a dataset and show how it scores"),
     "evaluate": (_evaluate_main, "train on the past, test on the future with injected anomalies"),
     "ablation": (_ablation_main, "rules vs Isolation Forest vs both, with and without context"),

@@ -564,7 +564,11 @@ def load_templates(db, endpoint_id: int) -> Templates:
 
     events = (
         db.query(SE)
-        .filter(SE.endpoint_id == endpoint_id, ~SE.wazuh_alert_id.like(SEED_PREFIX + "%"))
+        .filter(
+            SE.endpoint_id == endpoint_id,
+            ~SE.wazuh_alert_id.like(SEED_PREFIX + "%"),
+            SE.details["demo"].astext.is_(None),  # not copies of copies
+        )
         .order_by(SE.event_time)
         .all()
     )
@@ -679,9 +683,46 @@ def schedule(
     return plan
 
 
-def build_rows(plan: list[tuple[datetime, dict]], endpoint_id: int, seed: int = 2026):
+def demo_plan(
+    t: Templates, actions: int, days: int, hours: tuple[time, time], seed: int = 2026, now: datetime | None = None
+) -> list[tuple[datetime, dict]]:
+    """(time, template) for about `actions` of the user's own actions on the working days of the
+    `days` days before today, inside `hours`: a sign-in and a sign-out each day, and between them
+    the programs this computer really runs (clustered, as a program often starts several processes
+    at once), a little less over lunch. Standing in for activity that has not been collected yet."""
+    rng = random.Random(seed)
+    now = now or datetime.now(LOCAL_TZ)
+    today = now.astimezone(LOCAL_TZ).date()
+    # Only what the model counts as the person's own doing: a process the system started in their
+    # session under the machine account is not, and nor is admin tooling.
+    own = [tpl for tpl in t.session if is_user_action(row_from_event(tpl)) and not is_admin_tool(row_from_event(tpl))]
+    if not own:
+        raise NotEnoughEvents("None of this computer's real session events is the user's own action: nothing to copy.")
+    workdays = [d for d in (today - timedelta(days=i) for i in range(days, 0, -1)) if d.weekday() < 5]
+    busy = [rng.lognormvariate(0, 0.25) for _ in workdays]  # busier and quieter days
+    per_unit = actions / sum(busy)
+    plan: list[tuple[datetime, dict]] = []
+    for day, weight in zip(workdays, busy):
+        signin = datetime.combine(day, hours[0], tzinfo=LOCAL_TZ) + timedelta(minutes=rng.gauss(0, 8))
+        signout = datetime.combine(day, hours[1], tzinfo=LOCAL_TZ) + timedelta(minutes=rng.gauss(0, 10))
+        plan += [(signin, rng.choice(t.logons)), (signout, rng.choice(t.logoffs))]
+        todo, moments = max(0, round(weight * per_unit) - 2), []
+        while len(moments) < todo:
+            moment = signin + (signout - signin) * rng.random()
+            if moment.astimezone(LOCAL_TZ).hour == 12 and rng.random() < 0.6:
+                continue
+            size = 1 + (_poisson(rng, CLUSTER_EXTRA_MEAN - 1) if rng.random() < CLUSTER_CHANCE else 0)
+            moments += [moment + timedelta(seconds=k * rng.uniform(0.2, 6)) for k in range(size)]
+        plan += [(m, rng.choice(own)) for m in moments[:todo]]
+    plan.sort(key=lambda p: p[0])
+    return plan
+
+
+def build_rows(plan: list[tuple[datetime, dict]], endpoint_id: int, seed: int = 2026, demo: bool = False):
     """Turn the plan into security_events rows (without endpoint_id /
-    unique_id), lazily, with alert ids and event record ids in time order."""
+    unique_id), lazily, with alert ids and event record ids in time order.
+    Demo rows (see demo_plan) look like collected ones, down to a Wazuh-style alert id;
+    only details["demo"] marks them, so they can be removed again (delete_demo)."""
     rng = random.Random(seed + 1)
     record_id = rng.randint(100_000, 200_000)
     for seq, (t, tpl) in enumerate(plan, start=1):
@@ -697,9 +738,14 @@ def build_rows(plan: list[tuple[datetime, dict]], endpoint_id: int, seed: int = 
             win["system"] = system
             data["win"] = win
             details["data"] = data
-        details["seed"] = True
+        if demo:
+            details["demo"] = True
+            alert_id = f"{int(t.timestamp())}.{rng.randint(1_000_000, 999_999_999)}"
+        else:
+            details["seed"] = True
+            alert_id = f"{SEED_PREFIX}{endpoint_id}-{seq:07d}"
         row = {c: tpl[c] for c in _COLUMNS}
-        row.update(details=details, event_time=t, wazuh_alert_id=f"{SEED_PREFIX}{endpoint_id}-{seq:07d}")
+        row.update(details=details, event_time=t, wazuh_alert_id=alert_id)
         yield row
 
 
@@ -718,13 +764,26 @@ def delete_seed(db, endpoint_id: int) -> int:
     return deleted
 
 
-def write_seed(db, endpoint_id: int, unique_id: int, rows, total: int, batch: int = 2000) -> int:
-    """Replaces this endpoint's seed rows with `rows`, in batches."""
+def delete_demo(db, endpoint_id: int) -> int:
+    from app.models.security_event import SecurityEvent as SE
+
+    deleted = (
+        db.query(SE)
+        .filter(SE.endpoint_id == endpoint_id, SE.details["demo"].astext == "true")
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return deleted
+
+
+def write_seed(db, endpoint_id: int, unique_id: int, rows, total: int, batch: int = 2000, replace: bool = True) -> int:
+    """Stores `rows` in batches; with `replace`, the endpoint's old seed rows are removed first."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.models.security_event import SecurityEvent as SE
 
-    print(f"Removed {delete_seed(db, endpoint_id)} old seed rows.")
+    if replace:
+        print(f"Removed {delete_seed(db, endpoint_id)} old seed rows.")
     inserted, chunk = 0, []
 
     def flush() -> int:

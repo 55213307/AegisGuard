@@ -13,3 +13,4 @@ company/backend/.env
 *.csv.gz
 datasets/
 company/backend/*.db
+company/backend/ml_reports/

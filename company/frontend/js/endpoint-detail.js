@@ -203,7 +203,7 @@ const EndpointDetail = (() => {
     // can be hours old, so a manual retrain is offered rather than making people wait.
     document.getElementById("detailInfoList").innerHTML =
       rows.map(([label, value]) => `<div class="info-row"><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join("") +
-      `<div class="info-row"><dt>Behavior Model</dt><dd>${escapeHtml(learningText(account))} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailRetrainBtn">Retrain Now</button>` : ""}</dd></div>` +
+      `<div class="info-row"><dt>Behavior Model</dt><dd>${escapeHtml(learningText(account))} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailRetrainBtn">Retrain Now</button>` : ""} ${account.learning_tested ? `<button type="button" class="link-btn" id="detailReportBtn">Test results</button>` : ""}</dd></div>` +
       `<div class="info-row"><dt>Department</dt><dd>${escapeHtml(departmentLabel(account.department))} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailDepartmentBtn">Change</button>` : ""}</dd></div>` +
       `<div class="info-row"><dt>Working Hours</dt><dd>${escapeHtml(hours)} ${account.endpoint_name ? `<button type="button" class="link-btn" id="detailHoursBtn">Edit</button>` : ""}</dd></div>`;
     renderLiveLine();
@@ -361,7 +361,47 @@ const EndpointDetail = (() => {
     if (event.target.id === "detailHoursBtn") editWorkHours();
     if (event.target.id === "detailDepartmentBtn") editDepartment();
     if (event.target.id === "detailRetrainBtn") retrainNow(event.target);
+    if (event.target.id === "detailReportBtn") showTestResults();
   });
+
+  // The result of the model's last 80/20 test (the retrain script's report), in words and numbers.
+  async function showTestResults() {
+    if (!account) return;
+    let message;
+    try {
+      const r = await apiFetch(`/api/accounts/${account.id}/training-report`);
+      if (r.error) {
+        message = r.error;
+      } else {
+        const pct = (v) => `${(v * 100).toFixed(1)}%`;
+        const n = (v) => v.toLocaleString("en-US");
+        const day = (iso) => iso.slice(0, 10);
+        const c = r.confusion;
+        const m = r.metrics;
+        const data = r.data || {};
+        const source = data.mode === "real" ? "its own real activity" : `its real activity (${n(data.real_actions || 0)} actions) plus an assumed baseline`;
+        message = [
+          `Trained on ${source}: the oldest 80% (${n(r.train)} events, up to ${day(r.split)}) to learn from, the newest 20% (${n(r.test_normal)} events) to test on, plus ${n(r.injected)} injected anomalies.`,
+          ...(data.mode !== "real" ? ["Still learning: the baseline is an assumption, so this computer's real activity can look unfamiliar to the model."] : []),
+          ...(r.train < 1000 ? [`Only ${n(r.train)} events to learn from: the more history, the more this test says.`] : []),
+          "",
+          `Normal events: ${n(c.tn)} passed, ${n(c.fp)} false alarms`,
+          `Anomalies: ${n(c.tp)} caught, ${n(c.fn)} missed`,
+          "",
+          `Accuracy ${pct(m.accuracy)}   Precision ${pct(m.precision)}   Recall ${pct(m.recall)}   F1 ${pct(m.f1)}`,
+          `False-alarm rate ${pct(m.fpr)}   AUC ${m.auc.toFixed(3)}   (alert at risk ${r.threshold}+)`,
+          "",
+          "Caught, by kind of anomaly:",
+          ...r.kinds.map((k) => `  ${k.name}: ${pct(k.caught)}`),
+          "",
+          r.note,
+        ].join("\n");
+      }
+    } catch (err) {
+      message = err.message || "Could not load the test results.";
+    }
+    await Dialogs.notice({ title: "Test of the behavior model", message });
+  }
 
   // Training happens in the background; give it a moment, then pull the fresh
   // progress rather than leaving the old number showing.
@@ -387,6 +427,7 @@ const EndpointDetail = (() => {
       if (fresh) {
         render(fresh);
         onChanged();
+        showTestResults();
       } else {
         button.disabled = false;
         button.textContent = "Retrain Now";

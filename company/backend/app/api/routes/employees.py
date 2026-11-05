@@ -22,7 +22,7 @@ from app.schemas.employee import (
     SecurityEventListResponse,
 )
 from app.services import endpoint_lock, overtime, screens, wazuh
-from app.services.ml import runtime
+from app.services.ml import retrain, runtime
 from app.services.ml.model import EXPLAIN_RISK_FROM, department_catalog
 from app.services.ml.runtime import CRITICAL_RISK
 from app.services.installer import build_installer
@@ -134,6 +134,7 @@ def _learning(endpoint) -> dict:
         "learning_actions": progress["actions"],
         "learning_needed": progress["needed"],
         "learning_trained_at": progress["trained_at"],
+        "learning_tested": progress["tested"],
     }
 
 
@@ -346,15 +347,29 @@ def retrain_now(
 ) -> EmployeeOut:
     """Trains this endpoint's model right away instead of waiting for the
     scheduled round, so the Behavior Model progress reflects recent activity
-    without a multi-hour wait. Training runs in the background; the response
-    is the account as it is now, before the new model is ready."""
+    without a multi-hour wait. It runs the retrain script (ml/retrain.py): the
+    model is trained and tested 80/20, then swapped in, and the result of the
+    test can be read from /training-report. Training runs in the background;
+    the response is the account as it is now, before the new model is ready."""
     employee = _get_employee_or_404(employee_id, principal, db)
     if employee.endpoint is not None:
         now = time.time()
         if now - _last_retrain_request.get(employee.endpoint.id, 0.0) >= RETRAIN_COOLDOWN_SECONDS:
             _last_retrain_request[employee.endpoint.id] = now
-            runtime.retrain_soon(employee.endpoint.id)
+            retrain.run_in_background(employee.endpoint.id)
     return _to_out(employee, _agents_info([employee]))
+
+
+@router.get("/{employee_id}/training-report")
+def training_report(
+    employee_id: int, principal: Principal = Depends(require_password_changed), db: Session = Depends(get_db)
+) -> dict:
+    """The result of the model's last 80/20 test (see ml/retrain.py)."""
+    employee = _get_employee_or_404(employee_id, principal, db)
+    report = runtime.training_report(employee.endpoint.id) if employee.endpoint is not None else None
+    if report is None:
+        raise HTTPException(status_code=404, detail="The model has not been tested yet. Use Retrain Now.")
+    return retrain.public(report)
 
 
 @router.post("/{employee_id}/unlock", response_model=EmployeeOut)

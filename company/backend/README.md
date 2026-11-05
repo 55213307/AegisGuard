@@ -139,15 +139,32 @@ exercise it).
 
 ## Behavioral model
 
-Per-endpoint anomaly detection lives in `app/services/ml/`, four files that depend on each other in one
-direction (`model` ← `data` ← `runtime` ← `tools`):
+Per-endpoint anomaly detection lives in `app/services/ml/`, five files that depend on each other in one
+direction (`model` ← `data` ← `runtime` ← `tools` ← `retrain`):
 
 | file | what it is |
 |---|---|
 | `model.py` | the model itself, no database: the departments an employee can be in, the features an event is turned into (time of day, rarity, recent activity, parent/child pairs), and `BehaviorModel` (Isolation Forest + rules + learned command-line profiles) |
 | `data.py` | where the model's data comes from: loaders for the database and for dataset files, the automatic first baseline, the synthetic baseline (`seed`) |
 | `runtime.py` | what runs inside the backend: the models, kept **in memory only** (a restart retrains them), the thread that (re)trains them, and the scoring of new events (`risk_score`, `risk_reason`) |
-| `tools.py` | offline commands, never run by the backend |
+| `tools.py` | offline commands; the backend uses only `evaluate_split` (the 80/20 test), through `retrain.py` |
+| `retrain.py` | retrain + test by hand with charts; also what the portal's Retrain Now button runs |
+
+**Retrain and test, by hand: `retrain.py`.** One script that trains a model and tests it the standard way: split the
+events by time (oldest 80% to learn from, newest 20% to test on), inject labelled anomalies into the 20%, score,
+then print the confusion matrix, accuracy, precision, recall, F1, false-positive rate, AUC and recall per kind of
+anomaly, and draw the charts (`ml_reports/`). The portal's **Retrain Now** button runs the same code
+(`retrain.run`): it trains and tests, swaps the new model in, and shows the result (the dialog, and *Test results*
+next to the button, from `GET /api/accounts/{id}/training-report`). The injected anomalies are synthetic, and the
+test says little for a computer with a short history (the dialog says so).
+
+```
+python -m app.services.ml.retrain                         # the default dataset file
+python -m app.services.ml.retrain --csv file.csv.gz       # another dataset file
+python -m app.services.ml.retrain --endpoint-id 8         # an endpoint's events from the database, nothing changes
+python -m app.services.ml.retrain --endpoint-id 8 --apply # ...and the new model goes live
+add --show to open the charts in windows (needs matplotlib: pip install matplotlib)
+```
 
 Offline commands (from `company/backend`; on the server use `.venv/bin/python`):
 
@@ -157,6 +174,7 @@ python -m app.services.ml.tools evaluate  [--csv file]                 # held-ou
 python -m app.services.ml.tools ablation  [--csv file] [--out r.md]    # rules vs forest vs both
 python -m app.services.ml.tools export    --endpoint-id N --out f.csv.gz   # real events as a dataset
 python -m app.services.ml.tools seed      --endpoint-id N --out f.csv.gz   # synthetic baseline
+python -m app.services.ml.tools demo-history --endpoint-id N [--write|--delete]   # demo: ~2,200 typical actions over 3 weeks, stored like collected ones
 ```
 
 Dataset files are kept outside the repository, in `Final Year Project/datasets/` (see the README there);

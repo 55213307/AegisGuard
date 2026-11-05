@@ -107,6 +107,8 @@ class EmployeeOut(BaseModel):
     learning_needed: int | None = None
     # When that model was last trained: the progress above is only as fresh as this.
     learning_trained_at: datetime | None = None
+    # Whether that training included the 80/20 test (the Retrain Now button does): its result can be read.
+    learning_tested: bool | None = None
     # Highest behavioral risk score (0-100) of this computer's events in the
     # last 24 hours; None when it has none scored.
     risk_24h: int | None = None

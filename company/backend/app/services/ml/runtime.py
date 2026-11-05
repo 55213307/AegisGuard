@@ -339,6 +339,8 @@ class Entry:
     baseline_source: str = "none"
     # Admin tools this computer made a habit of and the model learned (action keys).
     adopted: frozenset = frozenset()
+    # The result of the 80/20 test (see retrain.py), for a training that was asked to test itself.
+    report: dict | None = None
 
     @property
     def time_trusted(self) -> bool:
@@ -390,7 +392,15 @@ def learning_progress(endpoint_id: int) -> dict | None:
         "actions": entry.real_actions,
         "needed": settings.ml_min_real_actions,
         "trained_at": entry.trained_at,
+        "tested": entry.report is not None and "error" not in entry.report,
     }
+
+
+def training_report(endpoint_id: int) -> dict | None:
+    """The last 80/20 test of the endpoint's model (None if it never ran one)."""
+    with _lock:
+        entry = _models.get(endpoint_id)
+    return entry.report if entry else None
 
 
 def adopted_actions(real_rows: list[dict], admin_ok: bool, adopt_days: int) -> frozenset:
@@ -512,9 +522,14 @@ def select_training_rows(
     return baseline + clean + extra, "baseline+real", excluded, len(clean)
 
 
-def train_endpoint(db, endpoint_id: int) -> Entry | None:
+def train_endpoint(db, endpoint_id: int, evaluate=None, apply: bool = True) -> Entry | None:
     """Train one endpoint's model and swap it in. Returns None (leaving any
-    existing model alone) when there isn't enough data to train."""
+    existing model alone) when there isn't enough data to train.
+
+    `evaluate(rows, make_model)`, when given, first tests the training rows the standard
+    way (train on 80%, test on 20%; see retrain.py) and the result goes to Entry.report.
+    With apply=False nothing is swapped in and no earlier events are scored: the
+    caller only wants the entry (and its report)."""
     started = time.time()
     since = datetime.now(timezone.utc) - timedelta(days=settings.ml_window_days)
     real = load_db(db, endpoint_id, include_seed=False, since=since, user_actions_only=True)
@@ -575,12 +590,25 @@ def train_endpoint(db, endpoint_id: int) -> Entry | None:
         log.info("Endpoint %s: no model yet (%s)", endpoint_id, exc)
         return None
 
-    model = BehaviorModel(
-        admin_ok=admin_ok,
-        adopted=adopted,
-        min_command_evidence=settings.ml_min_command_evidence,
-        min_program_commands=settings.ml_min_program_commands,
-    ).fit(rows)
+    def make_model() -> BehaviorModel:
+        return BehaviorModel(
+            admin_ok=admin_ok,
+            adopted=adopted,
+            min_command_evidence=settings.ml_min_command_evidence,
+            min_program_commands=settings.ml_min_program_commands,
+        )
+
+    report = None
+    if evaluate is not None:
+        try:
+            report = evaluate(rows, make_model)
+        except Exception as exc:  # a failed test must never cost the endpoint its model
+            log.exception("Endpoint %s: testing the model failed", endpoint_id)
+            report = {"error": f"The test failed: {exc}"}
+        if "error" not in report:
+            report["data"] = {"mode": mode, "baseline": source["name"], "real_actions": real_actions, "department": department}
+
+    model = make_model().fit(rows)
     entry = Entry(
         model=model,
         trained_at=datetime.now(timezone.utc),
@@ -591,7 +619,10 @@ def train_endpoint(db, endpoint_id: int) -> Entry | None:
         seconds=time.time() - started,
         baseline_source=source["name"],
         adopted=adopted,
+        report=report,
     )
+    if not apply:
+        return entry
     with _lock:
         _models[endpoint_id] = entry  # swapped in whole; readers never see a half-trained model
     health.ok("ml")

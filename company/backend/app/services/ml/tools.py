@@ -245,7 +245,32 @@ def _score(model: BehaviorModel, rows: list[dict], desc: str, chunk: int = 500, 
     return np.asarray(out)
 
 
-def _evaluate_metrics(y: np.ndarray, risk: np.ndarray, threshold: int) -> dict:
+def _score_all(model: BehaviorModel, rows: list[dict], chunk: int = 500) -> list:
+    out = []
+    for i in range(0, len(rows), chunk):
+        out.extend(model.score_many(rows[i : i + chunk]))
+    return out
+
+
+def _decide(model: BehaviorModel, rows: list[dict], scores: list) -> np.ndarray:
+    """What the portal does with each event: the CVSS score of the detection it would raise (the kind of
+    detection and the command model's verdict decide it, exactly as in runtime._score_into), 0 when
+    nothing is raised. This is what an alert is, so it is what the test counts."""
+    from app.services import cvss
+    from app.services.ml import runtime
+
+    verdicts = runtime._command_verdicts(rows)  # noqa: SLF001
+    out = np.zeros(len(rows))
+    for i, (row, s) in enumerate(zip(rows, scores)):
+        verdict = verdicts.get(i)
+        confirmed = bool(verdict and verdict["confirmed"])
+        if s.is_anomaly or confirmed:
+            kind = runtime.detection_for(model, row, s, verdict)
+            out[i] = cvss.score_detection(kind, "confirmed" if confirmed else "reasonable", model.requirements).score
+    return out
+
+
+def _evaluate_metrics(y: np.ndarray, risk: np.ndarray, threshold: float) -> dict:
     pred = risk >= threshold
     tn, fp, fn, tp = confusion_matrix(y, pred, labels=[False, True]).ravel()
     precision = tp / (tp + fp) if tp + fp else 0.0
@@ -284,20 +309,35 @@ def evaluate_split(rows: list[dict], make_model=BehaviorModel, train_share: floa
         return {"error": f"Only {len(actions)} user actions: too few to hold 20% back as a test."}
     split, end = test_normal[0]["event_time"], test_normal[-1]["event_time"]
 
+    from app.core.config import settings
+    from app.services import cvss
+
     started = time.time()
     model = make_model().fit(train)
     seconds = time.time() - started
+
+    # Admin tools are left out of the model's training and flagged on purpose (nobody in an ordinary role is
+    # expected to run them), so a real event of that kind is not "normal" for this test: it would be
+    # counted as a false alarm for doing what the policy asks. They stay in the timeline the model looks at.
+    admin_ok, adopted = getattr(model, "admin_ok", False), getattr(model, "adopted", frozenset())
+    all_normal = test_normal
+    test_normal = [r for r in all_normal if not (is_admin_tool(r, admin_ok) and action_key(r) not in adopted)]
+    excluded_admin = len(all_normal) - len(test_normal)
 
     injected = inject_anomalies(train, split, end, max(10, len(test_normal) // 100))
     rows_all = test_normal + [r for _, r in injected]
     # The model judges an event by what came just before it, so the test rows need that too
     # (normal ones from the normal timeline, each injected one from the activity around it).
-    _add_test_context(test_normal, [(k, i, [r]) for i, (k, r) in enumerate(injected)])
+    _add_test_context(all_normal, [(k, i, [r]) for i, (k, r) in enumerate(injected)])
     y = np.array([0] * len(test_normal) + [1] * len(injected))
     kind = np.array(["normal"] * len(test_normal) + [k for k, _ in injected])
-    risk = _score(model, rows_all, "Scoring test set", show=False)
+    scores = _score_all(model, rows_all)
+    risk = np.array([s.risk for s in scores])  # the behaviour model's own score: for its ranking (AUC, curves)
+    decision = _decide(model, rows_all, scores)  # what the portal does: the CVSS score of the detection
+    warn_from, lock_from = cvss.MEDIUM_FROM, settings.cvss_lock_from
 
-    m = _evaluate_metrics(y, risk, ANOMALY_RISK_THRESHOLD)
+    m = _evaluate_metrics(y, decision, warn_from)
+    mc = _evaluate_metrics(y, decision, lock_from)
     fpr, tpr, _ = roc_curve(y, risk)
     precision, recall, _ = precision_recall_curve(y, risk)
     edges = list(range(0, 105, 5))
@@ -322,20 +362,31 @@ def evaluate_split(rows: list[dict], make_model=BehaviorModel, train_share: floa
         "split": split.isoformat(),
         "to": end.isoformat(),
         "seconds": round(seconds, 1),
-        "threshold": ANOMALY_RISK_THRESHOLD,
+        # An alert is what the portal raises: a detection scored CVSS 4.0 (Warning) or more. The lock level
+        # (CVSS 7.0 or more, a Critical event) is reported next to it. See _decide.
+        "threshold": warn_from,
+        "threshold_critical": lock_from,
+        "ml_threshold": ANOMALY_RISK_THRESHOLD,  # the behaviour model's own score, on the histogram
+        "excluded_admin": excluded_admin,
         "confusion": {k: int(m[k]) for k in ("tn", "fp", "fn", "tp")},
         "metrics": {k: float(m[k]) for k in ("accuracy", "precision", "recall", "f1", "fpr")}
         | {"auc": float(roc_auc_score(y, risk))},
+        "critical": {
+            "confusion": {k: int(mc[k]) for k in ("tn", "fp", "fn", "tp")},
+            "metrics": {k: float(mc[k]) for k in ("accuracy", "precision", "recall", "f1", "fpr")},
+        },
         "kinds": [
             {
                 "name": name,
                 "count": int((kind == name).sum()),
-                "caught": float(np.mean(risk[kind == name] >= ANOMALY_RISK_THRESHOLD)),
+                "caught": float(np.mean(decision[kind == name] >= warn_from)),
+                "caught_critical": float(np.mean(decision[kind == name] >= lock_from)),
                 "median_risk": float(np.median(risk[kind == name])),
+                "median_cvss": float(np.median(decision[kind == name])),
             }
             for name in dict.fromkeys(k for k, _ in injected)
         ],
-        "sweep": [{"threshold": th} | {k: float(v) for k, v in _evaluate_metrics(y, risk, th).items() if k in ("precision", "recall", "f1", "fpr")} for th in (40, 50, 60, 70, 80, 90)],
+        "sweep": [{"threshold": th} | {k: float(v) for k, v in _evaluate_metrics(y, decision, th).items() if k in ("precision", "recall", "f1", "fpr")} for th in (3.0, 4.0, 5.0, 6.0, 7.0, 8.0)],
         "roc": {"fpr": _thin(fpr), "tpr": _thin(tpr)},
         "pr": {"precision": _thin(precision), "recall": _thin(recall)},
         "histogram": {
@@ -347,10 +398,12 @@ def evaluate_split(rows: list[dict], make_model=BehaviorModel, train_share: floa
             "x": [round(float(v), 3) for v in points[keep, 0]],
             "y": [round(float(v), 3) for v in points[keep, 1]],
             "anomaly": [int(v) for v in y[keep]],
-            "alarm": [int(v >= ANOMALY_RISK_THRESHOLD) for v in risk[keep]],
+            "alarm": [int(v >= warn_from) for v in decision[keep]],
             "kept": round(float(pca.explained_variance_ratio_.sum()), 3),
         },
-        "note": "The anomalies are synthetic: written by the authors and injected into the held-out period.",
+        "note": "The anomalies are synthetic: written by the authors and injected into the held-out period. "
+        "Every real event of the held-out days counts as normal, so a new program or an installation in those days "
+        "shows up as a false alarm even when it is harmless.",
     }
 
 
@@ -363,18 +416,25 @@ def print_report(report: dict) -> None:
     print(f"user actions : {report['actions']:,}   ({day(report['from'])} .. {day(report['to'])})")
     print(f"train ({report['train_share']:.0%})  : {report['train']:,}   up to {day(report['split'])}   (trained in {report['seconds']}s)")
     print(f"test normal  : {report['test_normal']:,}   {day(report['split'])} .. {day(report['to'])}")
+    if report.get("excluded_admin"):
+        print(f"               ({report['excluded_admin']:,} admin-tool events left out: the model flags them on purpose)")
     print(f"test anomalies: {report['injected']:,} injected ({len(report['kinds'])} kinds)\n")
-    print(f"=== Results at alert threshold risk >= {report['threshold']} ===")
+    print(f"=== An alert is what the portal raises: a detection of CVSS >= {report['threshold']} (Warning or Critical) ===")
     print("confusion matrix            predicted normal   predicted anomaly")
     print(f"  actual normal             {c['tn']:>16,} {c['fp']:>19,}")
     print(f"  actual anomaly            {c['fn']:>16,} {c['tp']:>19,}")
     print(f"accuracy  {m['accuracy'] * 100:6.2f}%   precision {m['precision'] * 100:6.2f}%   recall {m['recall'] * 100:6.2f}%   F1 {m['f1'] * 100:6.2f}%")
-    print(f"false-positive rate {m['fpr'] * 100:.2f}%   ROC-AUC {m['auc']:.4f}")
-    print("\ndetection by kind of anomaly (recall at the threshold, median risk):")
+    print(f"false-positive rate {m['fpr'] * 100:.2f}%   ROC-AUC of the behaviour model's score {m['auc']:.4f}")
+    if "critical" in report:
+        cc, mc = report["critical"]["confusion"], report["critical"]["metrics"]
+        print(f"\n=== The lock level: CVSS >= {report['threshold_critical']} (a Critical event, the computer is locked) ===")
+        print(f"  anomalies that would lock the computer: {cc['tp']:,} of {cc['tp'] + cc['fn']:,}    false locks: {cc['fp']:,} of {cc['tn'] + cc['fp']:,} normal events")
+        print(f"  precision {mc['precision'] * 100:6.2f}%   recall {mc['recall'] * 100:6.2f}%   F1 {mc['f1'] * 100:6.2f}%")
+    print("\ndetection by kind of anomaly (recall at the alert level / at the lock level, median CVSS):")
     for k in report["kinds"]:
-        print(f"  {k['name']:<52} caught {k['caught'] * 100:5.1f}%   median risk {k['median_risk']:.0f}")
-    print("\nthreshold sweep:")
-    print(f"  {'risk >=':<8} {'precision':>9} {'recall':>8} {'F1':>7} {'false-pos rate':>15}")
+        print(f"  {k['name']:<52} {k['caught'] * 100:5.1f}% / {k.get('caught_critical', 0) * 100:5.1f}%   median CVSS {k.get('median_cvss', 0):.1f}")
+    print("\nthreshold sweep (alert if CVSS >=):")
+    print(f"  {'CVSS >=':<8} {'precision':>9} {'recall':>8} {'F1':>7} {'false-pos rate':>15}")
     for s in report["sweep"]:
         print(f"  {s['threshold']:<8} {s['precision'] * 100:>8.1f}% {s['recall'] * 100:>7.1f}% {s['f1'] * 100:>6.1f}% {s['fpr'] * 100:>14.2f}%")
     print(f"\nNote: {report['note']} Normal rows are the real (or replayed) events of the held-out period.")

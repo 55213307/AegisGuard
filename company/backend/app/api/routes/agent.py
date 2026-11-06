@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.endpoint import Endpoint
 from app.models.removed_endpoint import RemovedEndpoint
-from app.services import endpoint_lock, screens
+from app.schemas.scan import ContainmentReport, ScanResult, ScanUpload
+from app.services import endpoint_lock, scan_results, screens
 
 # Called by the screen agent running on monitored computers, not by the
 # portal: it authenticates with the endpoint's own upload token instead of a
@@ -60,6 +61,31 @@ def maintenance(
     endpoint = _authenticated_endpoint(token, db)
     until = endpoint_lock.begin_maintenance(db, endpoint)
     return {"maintenance_until": until.isoformat()}
+
+
+@router.post("/scan", response_model=ScanResult)
+def upload_scan(
+    payload: ScanUpload,
+    token: str = Header(alias="X-AegisGuard-Token"),
+    db: Session = Depends(get_db),
+) -> ScanResult:
+    """A USB drive that was plugged in, or new files in a Downloads folder, as the scan agent saw them
+    (names, attributes and hashes: no file content). The rules and the threat-intelligence lookup are
+    run here; the findings become security events, and a Critical one locks the computer."""
+    endpoint = _authenticated_endpoint(token, db)
+    return ScanResult(**scan_results.store_scan(db, endpoint, payload))
+
+
+@router.post("/containment")
+def report_containment(
+    payload: ContainmentReport,
+    token: str = Header(alias="X-AegisGuard-Token"),
+    db: Session = Depends(get_db),
+) -> dict:
+    """What the scan agent did after a Critical finding (which processes it ended), stored as a security
+    event so that it shows in the portal and in the PDF report."""
+    endpoint = _authenticated_endpoint(token, db)
+    return scan_results.store_containment(db, endpoint, payload)
 
 
 @router.post("/screen")

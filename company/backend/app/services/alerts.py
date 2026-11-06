@@ -52,6 +52,7 @@ _WINDOWS_EVENT_LABELS: dict[str, str] = {
     "4738": "Account Changed",
     "4740": "Account Locked",
     "1102": "Audit Log Cleared",
+    "6416": "USB Device",  # a new external device was recognised (see services/badusb.py)
 }
 
 

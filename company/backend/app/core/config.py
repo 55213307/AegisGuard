@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     # used on this many different days is learned instead of being flagged forever.
     # Only for departments set to learn (see ml/features.DEPARTMENTS); 0 turns it off.
     ml_adopt_days: int = 4
+    # A detection whose CVSS score reaches this is shown as Critical and locks the computer.
+    # 7.0 is where the CVSS v3.1 rating turns from Medium to High; see services/cvss.py.
+    cvss_lock_from: float = 7.0
+    # The malicious-command model (ml/commands.py: LOLBAS rules + a classifier). Empty path = ml_models/command_model.joblib
+    # next to this backend. Without the file the rest of the scoring works as before.
+    # BadUSB (services/badusb.py): a shell or PowerShell command that starts this many seconds after a USB
+    # keyboard was plugged in is what a device that types commands looks like.
+    badusb_window_seconds: float = 10.0
+    command_model_enabled: bool = True
+    command_model_path: str = ""
     # The command line is only judged once this many baseline actions carry one, and a
     # program only once it has this many of its own (see ml/model.py). Lower them to see it
     # work on a computer with little history; the defaults keep a young model from guessing.

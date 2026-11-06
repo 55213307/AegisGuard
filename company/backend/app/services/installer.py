@@ -4,8 +4,10 @@ Each file embeds that endpoint's own Wazuh agent key and screen-upload
 token, so it's a credential: whoever runs it gets a computer enrolled as
 this endpoint. It shows a monitoring notice that must be accepted, installs
 the Wazuh agent, writes the key into client.keys (so no open self-enrollment
-is needed), and installs the screen agent as a hidden task that runs in each
-user's session at logon (a Windows service can't capture the desktop).
+is needed), installs the screen agent as a hidden task that runs in each
+user's session at logon (a Windows service can't capture the desktop), and
+installs the scan agent, a SYSTEM task that reports USB drives and new
+downloads (names, attributes and hashes only) for the portal to judge.
 """
 
 import base64
@@ -18,6 +20,8 @@ SCREEN_AGENT_PATH = INSTALL_DIR + r"\screen-agent.ps1"
 TASK_NAME = "AegisGuard Screen Agent"
 REMOVAL_TASK_NAME = "AegisGuard Removal Check"
 REMOVAL_AGENT_PATH = INSTALL_DIR + r"\remove-agent.ps1"
+SCAN_AGENT_PATH = INSTALL_DIR + r"\scan-agent.ps1"
+SCAN_TASK_NAME = "AegisGuard Scan Agent"
 # Longest piece of Base64 put on one line of the .cmd (cmd's limit is 8191 per line).
 _CMD_CHUNK = 6000
 
@@ -298,6 +302,310 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Silen
 Start-ScheduledTask -TaskName '__TASK_NAME__'
 """
 
+# Runs as SYSTEM from startup, hidden, in a loop. It looks for a USB drive that has just been plugged in and
+# for new files in the users' Downloads folders, and reports what it finds to the portal, which judges it
+# (services/scan_results.py). It only reads: nothing is opened, run, changed, and no file content is sent,
+# only names, attributes and hashes.
+_SCAN_AGENT = r"""# AegisGuard scan agent. Reports to the portal; the portal decides what is bad.
+$ErrorActionPreference = 'Continue'
+$Url = '__SCAN_URL__'
+$Token = '__TOKEN__'
+$StateDir = Join-Path $env:ProgramData 'AegisGuard'
+$StateFile = Join-Path $StateDir 'scan-state.txt'
+$LogFile = Join-Path $StateDir 'scan.log'
+# Programs, scripts, shortcuts, libraries and installers: what a USB worm is made of, and what is hashed.
+$Programs = @('.exe', '.scr', '.com', '.pif', '.bat', '.cmd', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.ps1', '.hta', '.cpl', '.msi', '.jar', '.lnk', '.dll')
+# Hashed as well: archives and documents are what downloads are mostly made of.
+$HashTypes = $Programs + @('.zip', '.rar', '.7z', '.iso', '.img', '.doc', '.docx', '.docm', '.xls', '.xlsx', '.xlsm', '.ppt', '.pptm', '.pdf', '.rtf')
+$PartialTypes = @('.crdownload', '.part', '.tmp', '.download', '.opdownload')
+$MaxHashBytes = 200MB
+$MaxEntries = 4000
+$DownloadsEvery = 60
+$DrivePoll = 3
+
+# What the agent did, for whoever has to find out why a drive was not reported (ProgramData\AegisGuard\scan.log).
+function Write-Log([string]$Message) {
+    try {
+        New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+        if ((Test-Path -LiteralPath $LogFile) -and ((Get-Item -LiteralPath $LogFile).Length -gt 1MB)) { Remove-Item -LiteralPath $LogFile -Force }
+        Add-Content -LiteralPath $LogFile -Value ('[{0}] {1}' -f (Get-Date -Format 's'), $Message) -Encoding UTF8
+    } catch {}
+}
+
+function Send-Scan($Body) {
+    $json = $Body | ConvertTo-Json -Depth 6 -Compress
+    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+    $reply = Invoke-RestMethod -Uri $Url -Method Post -Body $bytes -ContentType 'application/json; charset=utf-8' -Headers @{ 'X-AegisGuard-Token' = $Token } -TimeoutSec 60
+    Write-Log ('sent {0} scan of {1}: {2} entries, portal found {3}' -f $Body.kind, $Body.source, @($Body.files).Count, $reply.findings)
+    return $reply
+}
+
+# Programs that must never be ended, whatever the portal says.
+$Protected = @('system', 'registry', 'smss.exe', 'csrss.exe', 'wininit.exe', 'winlogon.exe', 'services.exe', 'lsass.exe', 'svchost.exe', 'explorer.exe', 'dwm.exe', 'fontdrvhost.exe')
+
+# Containment, when the portal reports a Critical finding: end the processes that run from a place (a
+# USB drive: their program or their command line is on it) or from exact files, and the processes they
+# started. A lock keeps a person from the keyboard; it does not stop a script that is already running.
+function Stop-FromLocation([string[]]$Prefixes, [string[]]$Files) {
+    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $targets = @{}
+    foreach ($p in $all) {
+        if (($p.ProcessId -eq $PID) -or ($Protected -contains ([string]$p.Name).ToLower())) { continue }
+        $path = [string]$p.ExecutablePath
+        $cmd = [string]$p.CommandLine
+        $hit = $false
+        foreach ($x in $Prefixes) {
+            if ($x -and ($path.StartsWith($x, [StringComparison]::OrdinalIgnoreCase) -or $cmd.IndexOf($x, [StringComparison]::OrdinalIgnoreCase) -ge 0)) { $hit = $true }
+        }
+        foreach ($f in $Files) { if ($f -and ($path -ieq $f)) { $hit = $true } }
+        if ($hit) { $targets[[int]$p.ProcessId] = $p }
+    }
+    do {  # what those processes started
+        $added = $false
+        foreach ($p in $all) {
+            if ($targets.ContainsKey([int]$p.ParentProcessId) -and -not $targets.ContainsKey([int]$p.ProcessId) -and ($p.ProcessId -ne $PID) -and -not ($Protected -contains ([string]$p.Name).ToLower())) {
+                $targets[[int]$p.ProcessId] = $p
+                $added = $true
+            }
+        }
+    } while ($added)
+    $ended = @()
+    $failed = @()
+    foreach ($id in $targets.Keys) {
+        $p = $targets[$id]
+        if (-not (Get-Process -Id $id -ErrorAction SilentlyContinue)) { continue }  # already gone (it ended with its parent)
+        $line = ([string]$p.CommandLine)
+        $record = [ordered]@{ name = [string]$p.Name; pid = [int]$id; command_line = $line.Substring(0, [Math]::Min(300, $line.Length)) }
+        try {
+            Stop-Process -Id $id -Force -ErrorAction Stop
+            $ended += $record
+            Write-Log ('containment: ended {0} (pid {1}) {2}' -f $p.Name, $id, $line.Substring(0, [Math]::Min(150, $line.Length)))
+        } catch {
+            $record.error = $_.Exception.Message.Substring(0, [Math]::Min(200, $_.Exception.Message.Length))
+            $failed += $record
+            Write-Log ('containment: could not end ' + $p.Name + ' (pid ' + $id + '): ' + $_.Exception.Message)
+        }
+    }
+    return @{ Ended = $ended; Failed = $failed }
+}
+
+# Tells the portal what containment did (it becomes a "Containment" event in Security Logs).
+function Send-Containment($ScanId, $Source, $Result) {
+    $body = @{ scan_id = $ScanId; source = $Source; ended = @($Result.Ended); failed = @($Result.Failed) }
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 6 -Compress))
+    Invoke-RestMethod -Uri ($Url -replace '/scan$', '/containment') -Method Post -Body $bytes -ContentType 'application/json; charset=utf-8' -Headers @{ 'X-AegisGuard-Token' = $Token } -TimeoutSec 30 | Out-Null
+    Write-Log ('containment reported to the portal: {0} ended, {1} could not be ended' -f @($Result.Ended).Count, @($Result.Failed).Count)
+}
+
+function Get-Sha256($Path) {
+    try { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLower() } catch { return $null }
+}
+
+# What an autorun.inf starts, and whether those programs carry a valid digital signature
+# (a Windows installation drive has an autorun.inf too, pointing at Microsoft's signed setup.exe).
+function Get-AutorunInfo($Root, $File) {
+    $lines = @()
+    try {
+        foreach ($l in (Get-Content -LiteralPath $File -TotalCount 100 -ErrorAction Stop)) {
+            if ($l -match '^\s*(open|shellexecute|shell\\[^=]*\\command)\s*=\s*(.+)$') { $lines += $l.Trim() }
+        }
+    } catch {}
+    $programs = @()
+    foreach ($l in $lines) {
+        $value = ($l -split '=', 2)[1].Trim().Trim('"')
+        $words = $value -split ' '
+        for ($n = $words.Count; $n -ge 1; $n--) {
+            try {
+                $candidate = Join-Path $Root (($words[0..($n - 1)] -join ' ').Trim('"'))
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) { $programs += $candidate; break }
+            } catch {}
+        }
+    }
+    $signed = $false
+    if ($programs.Count -gt 0) {
+        $signed = $true
+        foreach ($p in $programs) {
+            try { if ([string](Get-AuthenticodeSignature -LiteralPath $p).Status -ne 'Valid') { $signed = $false } } catch { $signed = $false }
+        }
+    }
+    return @{ Target = ($lines -join '; '); Signed = $signed }
+}
+
+# The part of a drive's file list that the rules look at: programs, scripts, shortcuts and libraries,
+# hidden files and folders, and autorun.inf. The SHA256 of the programs, where shortcuts lead.
+function Get-DriveListing($Drive) {
+    $root = (Get-Item -LiteralPath ($Drive + '\') -Force).FullName.TrimEnd('\')
+    $shell = New-Object -ComObject WScript.Shell
+    $entries = New-Object System.Collections.ArrayList
+    $total = 0
+    foreach ($it in (Get-ChildItem -LiteralPath ($root + '\') -Recurse -Force -ErrorAction SilentlyContinue)) {
+        $rel = $it.FullName.Substring($root.Length).TrimStart('\')
+        if ($rel -match '^(System Volume Information|\$RECYCLE\.BIN)(\\|$)') { continue }
+        $total++
+        if ($entries.Count -ge $MaxEntries) { continue }
+        $hidden = (([int]$it.Attributes -band 6) -ne 0)  # Hidden or System
+        if ($it.PSIsContainer) {
+            if ($hidden) { [void]$entries.Add([ordered]@{ path = $rel; is_dir = $true; size = 0; hidden = $true; sha256 = $null; target = $null; target_signed = $null }) }
+            continue
+        }
+        $ext = $it.Extension.ToLower()
+        $isAutorun = ($it.Name -ieq 'autorun.inf') -and ($it.DirectoryName.TrimEnd('\') -eq $root)
+        if (-not ($hidden -or ($Programs -contains $ext) -or $isAutorun)) { continue }
+        $entry = [ordered]@{ path = $rel; is_dir = $false; size = [long]$it.Length; hidden = $hidden; sha256 = $null; target = $null; target_signed = $null }
+        if (($HashTypes -contains $ext) -and ($it.Length -le $MaxHashBytes)) { $entry.sha256 = Get-Sha256 $it.FullName }
+        if ($ext -eq '.lnk') {
+            try { $l = $shell.CreateShortcut($it.FullName); $entry.target = ("$($l.TargetPath) $($l.Arguments)").Trim() } catch {}
+        }
+        if ($isAutorun) {
+            $info = Get-AutorunInfo $root $it.FullName
+            $entry.target = $info.Target
+            $entry.target_signed = $info.Signed
+        }
+        [void]$entries.Add($entry)
+    }
+    return @{ Total = $total; Files = $entries }
+}
+
+# Letters of USB drives: flash drives (removable) and USB disks.
+function Get-UsbDrives {
+    $letters = @()
+    try { Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=2' -ErrorAction Stop | ForEach-Object { $letters += $_.DeviceID } } catch {}
+    try {
+        Get-Disk -ErrorAction Stop | Where-Object { $_.BusType -eq 'USB' } | Get-Partition -ErrorAction SilentlyContinue |
+            Where-Object { $_.DriveLetter } | ForEach-Object { $letters += ([string]$_.DriveLetter + ':') }
+    } catch {}
+    # A USB device can present itself as a CD drive: Windows still runs AutoRun for those (Microsoft, 2009),
+    # so a drive of that kind is the one to look at most.
+    try {
+        Get-CimInstance Win32_CDROMDrive -ErrorAction Stop | Where-Object { $_.PNPDeviceID -like 'USBSTOR*' -and $_.Drive } | ForEach-Object { $letters += $_.Drive }
+    } catch {}
+    return @($letters | Sort-Object -Unique)
+}
+
+function Scan-Drive($Drive) {
+    $label = ''
+    try { $label = (Get-Volume -DriveLetter $Drive.Substring(0, 1) -ErrorAction Stop).FileSystemLabel } catch {}
+    $listing = Get-DriveListing $Drive
+    $scanId = [guid]::NewGuid().ToString('N')
+    $source = ($Drive + ' (' + $label + ')')
+    $reply = Send-Scan @{ scan_id = $scanId; kind = 'usb'; source = $source; total = $listing.Total; files = @($listing.Files) }
+    if ($reply.contain) {
+        $result = Stop-FromLocation @(($Drive + '\')) @()
+        try { Send-Containment $scanId $source $result } catch { Write-Log ('containment report not sent: ' + $_.Exception.Message) }
+    }
+}
+
+function Get-DownloadFolders {
+    @(Get-ChildItem 'C:\Users' -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'Downloads' } | Where-Object { Test-Path -LiteralPath $_ })
+}
+
+function Get-FileKey($f) { return ($f.FullName + '|' + $f.LastWriteTimeUtc.Ticks + '|' + $f.Length) }
+
+# New files in Downloads, not yet reported. The first time the agent runs, what is already there is
+# only remembered, not reported.
+function Scan-Downloads($Seen, [bool]$Baseline) {
+    $now = [DateTime]::UtcNow
+    $new = @()
+    foreach ($folder in (Get-DownloadFolders)) {
+        foreach ($f in (Get-ChildItem -LiteralPath $folder -File -Recurse -Depth 1 -Force -ErrorAction SilentlyContinue)) {
+            $key = Get-FileKey $f
+            if ($Seen.ContainsKey($key)) { continue }
+            if ($PartialTypes -contains $f.Extension.ToLower()) { continue }
+            if (($now - $f.LastWriteTimeUtc).TotalSeconds -lt 10) { continue }  # still being written
+            if ($Baseline) { $Seen[$key] = $true; continue }
+            $new += , @($f, $key)
+        }
+    }
+    if ($Baseline -or $new.Count -eq 0) { return }
+    for ($i = 0; $i -lt $new.Count; $i += 100) {
+        $batch = $new[$i..([Math]::Min($i + 99, $new.Count - 1))]
+        $files = @()
+        foreach ($pair in $batch) {
+            $f = $pair[0]
+            $ext = $f.Extension.ToLower()
+            $sha = $null
+            if (($HashTypes -contains $ext) -and ($f.Length -le $MaxHashBytes)) { $sha = Get-Sha256 $f.FullName }
+            $files += [ordered]@{ path = $f.FullName; is_dir = $false; size = [long]$f.Length; hidden = $false; sha256 = $sha; target = $null; target_signed = $null }
+        }
+        try {
+            $scanId = [guid]::NewGuid().ToString('N')
+            $reply = Send-Scan @{ scan_id = $scanId; kind = 'download'; source = 'Downloads'; total = $new.Count; files = @($files) }
+            foreach ($pair in $batch) { $Seen[$pair[1]] = $true }
+            if ($reply.contain) {
+                $result = Stop-FromLocation @() @($reply.contain_paths)
+                try { Send-Containment $scanId 'Downloads' $result } catch { Write-Log ('containment report not sent: ' + $_.Exception.Message) }
+            }
+        } catch { Write-Log ('downloads not sent, will retry: ' + $_.Exception.Message) }  # not remembered: tried again next time
+    }
+}
+
+function Save-State($Seen) {
+    try {
+        New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+        Set-Content -LiteralPath $StateFile -Value @($Seen.Keys) -Encoding UTF8
+    } catch {}
+}
+
+# --- main loop ---
+# Dot-sourcing this file (to test its functions) does not start it.
+if ($MyInvocation.InvocationName -ne '.') {
+    Write-Log 'scan agent started'
+    $seen = @{}
+    $baseline = -not (Test-Path -LiteralPath $StateFile)
+    if (-not $baseline) { foreach ($line in (Get-Content -LiteralPath $StateFile -Encoding UTF8 -ErrorAction SilentlyContinue)) { if ($line) { $seen[$line] = $true } } }
+    $scanned = @{}
+    $retryAfter = @{}
+    $sinceDownloads = $DownloadsEvery
+    while ($true) {
+        $present = Get-UsbDrives
+        foreach ($drive in @($scanned.Keys)) { if ($present -notcontains $drive) { $scanned.Remove($drive) } }  # unplugged: scanned again next time
+        foreach ($drive in @($retryAfter.Keys)) { if ($present -notcontains $drive) { $retryAfter.Remove($drive) } }
+        foreach ($drive in $present) {
+            if ($scanned.ContainsKey($drive) -or -not (Test-Path -LiteralPath ($drive + '\'))) { continue }
+            if ($retryAfter.ContainsKey($drive) -and ([DateTime]::UtcNow -lt $retryAfter[$drive])) { continue }
+            Write-Log ('USB drive ' + $drive + ' found')
+            try {
+                Scan-Drive $drive
+                $scanned[$drive] = $true
+                $retryAfter.Remove($drive)
+            } catch {
+                # not ready or the portal cannot be reached: try again in a minute, not every few seconds (a scan reads the whole drive)
+                $retryAfter[$drive] = [DateTime]::UtcNow.AddSeconds(60)
+                Write-Log ('scan of ' + $drive + ' failed, will retry in 60 s: ' + $_.Exception.Message)
+            }
+        }
+        if ($sinceDownloads -ge $DownloadsEvery) {
+            $sinceDownloads = 0
+            Scan-Downloads $seen $baseline
+            $baseline = $false
+            Save-State $seen
+        }
+        Start-Sleep -Seconds $DrivePoll
+        $sinceDownloads += $DrivePoll
+    }
+}
+"""
+
+# Runs once, elevated, from the installer: writes the scan agent and starts it as a SYSTEM task at startup.
+# Separate from the other setups so that it can fail alone: monitoring works without it.
+_SETUP_SCAN_AGENT = r"""$ErrorActionPreference = 'Stop'
+try {
+    New-Item -ItemType Directory -Force -Path '__INSTALL_DIR__' | Out-Null
+    [IO.File]::WriteAllBytes('__SCAN_PATH__', [Convert]::FromBase64String(__SCAN_B64__))
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "__SCAN_PATH__"'
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName '__SCAN_TASK_NAME__' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    # On a re-install the running agent keeps its old token in memory: stop it, so the new one reads the new token.
+    Stop-ScheduledTask -TaskName '__SCAN_TASK_NAME__' -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*__SCAN_PATH__*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-ScheduledTask -TaskName '__SCAN_TASK_NAME__'
+} catch {
+    Write-Warning ('The USB and download scan could not be set up: ' + $_.Exception.Message)
+}
+"""
+
 # Runs as SYSTEM on the endpoint (see the comments inside the script).
 _REMOVAL_AGENT = r"""# Runs as SYSTEM every few minutes (scheduled task). Asks the portal whether this
 # computer's employee account has been deleted, and only when the portal says so
@@ -307,6 +615,7 @@ $StatusUrl = '__STATUS_URL__'
 $Token = '__TOKEN__'
 $InstallDir = '__INSTALL_DIR__'
 $ScreenTask = '__TASK_NAME__'
+$ScanTask = '__SCAN_TASK_NAME__'
 $RemovalTask = '__REMOVAL_TASK_NAME__'
 $DryRun = $false
 $Log = Join-Path $env:ProgramData 'AegisGuard-removal.log'
@@ -333,6 +642,14 @@ Step 'stop the screen agent' {
 }
 Step 'remove the screen agent task' {
     Unregister-ScheduledTask -TaskName $ScreenTask -Confirm:$false -ErrorAction SilentlyContinue
+}
+Step 'stop and remove the USB and download scan' {
+    Stop-ScheduledTask -TaskName $ScanTask -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*$InstallDir*scan-agent.ps1*" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Unregister-ScheduledTask -TaskName $ScanTask -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $env:ProgramData 'AegisGuard') -Recurse -Force -ErrorAction SilentlyContinue
 }
 Step 'undo the lock settings left in the profiles of signed-in users' {
     Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^S-1-5-21-[\d-]+$' } | ForEach-Object {
@@ -408,6 +725,9 @@ echo.
 echo  Once installed, the company's security team will be able to:
 echo    - collect security events and system logs from this computer
 echo    - view this computer's screen in real time
+echo    - check USB drives that are plugged in, and newly downloaded
+echo      files, for malware (it reads file names and fingerprints;
+echo      the files themselves are not sent anywhere)
 echo    - remove AegisGuard from this computer again (it uninstalls
 echo      itself when this employee account is deleted)
 echo.
@@ -478,6 +798,9 @@ rem (e.g. Chinese) Windows too. Best-effort: never fail the install over it.
 auditpol /set /subcategory:"{{0CCE922B-69AE-11D9-BED3-505054503030}}" /success:enable /failure:enable >nul 2>&1
 rem Event 4625 (failed logon) feeds the "3 wrong passwords" alert.
 auditpol /set /subcategory:"{{0CCE9215-69AE-11D9-BED3-505054503030}}" /success:enable /failure:enable >nul 2>&1
+rem Event 6416 (a new external device was recognised) feeds the BadUSB check: a USB keyboard
+rem followed within seconds by a command prompt is a device that types commands.
+auditpol /set /subcategory:"{{0CCE9248-69AE-11D9-BED3-505054503030}}" /success:enable >nul 2>&1
 rem Include the command line in 4688 events (e.g. "powershell -enc ...").
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f >nul 2>&1
 
@@ -495,8 +818,15 @@ rem If Windows Tamper Protection refuses, the manual steps are shown at the end.
 powershell -NoProfile -Command "try {{ Add-MpPreference -ExclusionPath '{install_dir}' }} catch {{}}" >nul 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {setup_encoded}
 if %errorlevel% neq 0 goto fail
+{screen_agent_clear_lines}
 rem Lets the company remove AegisGuard again when it deletes this account. Best effort.
 powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {removal_setup_encoded}
+{removal_agent_clear_lines}
+rem Checks USB drives that are plugged in and new downloads for malware. Best effort, and its
+rem script is only put in the environment now, since the environment has a size limit.
+{scan_agent_set_lines}
+powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {scan_setup_encoded}
+{scan_agent_clear_lines}
 
 del "%MSI%" >nul 2>&1
 echo.
@@ -556,6 +886,12 @@ def _env_chunks(prefix: str, text: str) -> tuple[str, str]:
     return set_lines, expr
 
 
+def _clear_lines(set_lines: str) -> str:
+    """`set "NAME="` for every variable `set_lines` sets: an empty value removes it, which frees the
+    environment (Windows keeps all of it, at most about 32 KB, for every program started)."""
+    return "\n".join(f'set "{name}="' for name in re.findall(r'^set "(\w+)=', set_lines, flags=re.M))
+
+
 def build_installer(company: str, employee: str, key_line: str, screen_token: str) -> bytes:
     portal = settings.portal_public_url.rstrip("/")
     screen_agent = _SCREEN_AGENT.replace("__UPLOAD_URL__", portal + "/api/agent/screen").replace("__TOKEN__", screen_token)
@@ -564,10 +900,19 @@ def build_installer(company: str, employee: str, key_line: str, screen_token: st
         .replace("__TOKEN__", screen_token)
         .replace("__INSTALL_DIR__", INSTALL_DIR)
         .replace("__TASK_NAME__", TASK_NAME)
+        .replace("__SCAN_TASK_NAME__", SCAN_TASK_NAME)
         .replace("__REMOVAL_TASK_NAME__", REMOVAL_TASK_NAME)
     )
+    scan_agent = _SCAN_AGENT.replace("__SCAN_URL__", portal + "/api/agent/scan").replace("__TOKEN__", screen_token)
     agent_set_lines, agent_b64_expr = _env_chunks("AG_SCREEN_AGENT", screen_agent)
     removal_set_lines, removal_b64_expr = _env_chunks("AG_REMOVAL_AGENT", removal_agent)
+    scan_set_lines, scan_b64_expr = _env_chunks("AG_SCAN_AGENT", scan_agent)
+    scan_setup = (
+        _SETUP_SCAN_AGENT.replace("__INSTALL_DIR__", INSTALL_DIR)
+        .replace("__SCAN_B64__", scan_b64_expr)
+        .replace("__SCAN_PATH__", SCAN_AGENT_PATH)
+        .replace("__SCAN_TASK_NAME__", SCAN_TASK_NAME)
+    )
     setup = (
         _SETUP_SCREEN_AGENT.replace("__INSTALL_DIR__", INSTALL_DIR)
         .replace("__AGENT_B64__", agent_b64_expr)
@@ -592,8 +937,13 @@ def build_installer(company: str, employee: str, key_line: str, screen_token: st
         # Base64 keeps the multi-line scripts out of cmd.exe's quoting rules.
         screen_agent_set_lines=agent_set_lines,
         removal_agent_set_lines=removal_set_lines,
+        scan_agent_set_lines=scan_set_lines,
+        screen_agent_clear_lines=_clear_lines(agent_set_lines),
+        removal_agent_clear_lines=_clear_lines(removal_set_lines),
+        scan_agent_clear_lines=_clear_lines(scan_set_lines),
         setup_encoded=base64.b64encode(setup.encode("utf-16-le")).decode("ascii"),
         removal_setup_encoded=base64.b64encode(removal_setup.encode("utf-16-le")).decode("ascii"),
+        scan_setup_encoded=base64.b64encode(scan_setup.encode("utf-16-le")).decode("ascii"),
     )
     # cmd.exe expects CRLF line endings.
     return script.replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii")

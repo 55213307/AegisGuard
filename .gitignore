@@ -14,3 +14,4 @@ company/backend/.env
 datasets/
 company/backend/*.db
 company/backend/ml_reports/
+company/backend/ml_models/

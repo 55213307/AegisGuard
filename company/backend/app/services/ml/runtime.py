@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.employee import Employee
 from app.models.endpoint import Endpoint
-from app.services import health
+from app.services import badusb, cvss, health
 from app.services.ml.data import (
     DAY,
     SEED_PREFIX,
@@ -34,6 +34,7 @@ from app.services.ml.model import (
     HIGH_RISK_TOOLS,
     LOCAL_TZ,
     VARIETY_WINDOW,
+    _ROUTINE_EVENT_TYPES,
     _USER_EVENT_TYPES,
     action_key,
     add_context,
@@ -59,20 +60,79 @@ from app.services.ml.model import (
 # the registry that trains the models.
 
 _SEVERITY_ORDER = {"Info": 0, "Warning": 1, "Critical": 2}
-# A risk this high is Critical; from the alert threshold up it is a Warning.
-CRITICAL_RISK = 90
+# What the model flags is scored with CVSS v3.1 (services/cvss.py), and the event's risk_score
+# is that score x 10 (7.5 -> 75), so the 0-100 scale the portal shows keeps its meaning:
+# 40 and up is a CVSS Medium (a Warning), CRITICAL_RISK (70, a CVSS High) and up is Critical,
+# which locks the computer. Events the model does not flag keep the model's own score.
+CRITICAL_RISK = int(round(settings.cvss_lock_from * 10))
 
 
-def severity_for_risk(risk: int, current: str | None) -> str | None:
-    """The event's severity once its behavioral risk is taken into account: an
-    anomaly is at least a Warning, a strong one Critical. Never lowers the
-    severity Wazuh's rule level already gave it."""
-    if risk >= CRITICAL_RISK:
-        target = "Critical"
-    elif risk >= ANOMALY_RISK_THRESHOLD:
-        target = "Warning"
-    else:
-        return current
+_command_model = None
+_command_model_tried = False
+
+
+def command_model():
+    """The malicious-command model (rules + classifier, ml/commands.py), loaded once; None when
+    it is switched off or its file is missing, in which case scoring works without it."""
+    global _command_model, _command_model_tried
+    if _command_model_tried or not settings.command_model_enabled:
+        return _command_model
+    _command_model_tried = True
+    path = Path(settings.command_model_path) if settings.command_model_path else Path(__file__).resolve().parents[3] / "ml_models" / "command_model.joblib"
+    try:
+        if path.exists():
+            from app.services.ml import commands
+
+            _command_model = commands.load(path)
+            log.info("Malicious-command model loaded from %s (%d rules).", path, _command_model.rules.entries if _command_model.rules else 0)
+        else:
+            log.info("No malicious-command model at %s: commands are not judged by it.", path)
+    except Exception:
+        log.exception("Loading the malicious-command model failed; commands are not judged by it")
+    return _command_model
+
+
+def _command_text(row: dict) -> str:
+    return (row.get("command") or row.get("command_line") or "").strip()
+
+
+def _command_verdicts(rows: list[dict]) -> dict[int, dict]:
+    """index -> verdict of the command model, for the rows that are a user action with a command."""
+    model = command_model()
+    if model is None:
+        return {}
+    at = [i for i, r in enumerate(rows) if is_user_action(r) and len(_command_text(r)) >= 3]
+    if not at:
+        return {}
+    try:
+        return dict(zip(at, model.check_many([_command_text(rows[i]) for i in at])))
+    except Exception:  # a failure here must never stop events from being scored
+        log.exception("Judging commands failed")
+        return {}
+
+
+def detection_for(model: BehaviorModel, row: dict, score, verdict: dict | None = None) -> str:
+    """Which kind of detection (a key of cvss.CATALOG) a flagged event is. The kind is what
+    the event IS: a command the command model calls malicious, an encoded command line, a risky
+    tool, a program never run here, or the user's usual doing at an unusual time. `verdict` is
+    the command model's judgement of the command (None when there is no model or no command)."""
+    if verdict and verdict["malicious"]:
+        return "malicious_command"
+    if score.command >= 0.3 and "encoded" in (model._command_novelty(row)[1] or ""):
+        return "encoded_command"
+    if (row.get("process_name") or "") in HIGH_RISK_TOOLS and verdict is None:
+        return "high_risk_tool"  # no command model: judged by the program alone
+    if score.novelty > 0:  # never seen on this computer
+        if row["event_type"] in _ROUTINE_EVENT_TYPES:
+            return "new_privileged_logon"
+        if row["windows_event_id"] in ("4688", "4104"):
+            return "admin_tool" if is_admin_tool(row, model.admin_ok) else "new_program"
+    return "unusual_activity"
+
+
+def severity_for_cvss(score: float, current: str | None) -> str:
+    """The portal's severity for a CVSS score; never lowers what Wazuh's rule level gave."""
+    target = cvss.severity_for_score(score, settings.cvss_lock_from)
     if current and _SEVERITY_ORDER.get(current, 0) >= _SEVERITY_ORDER[target]:
         return current
     return target
@@ -136,16 +196,131 @@ def failed_logon_counter(db, batch: list[dict] | None = None):
 
 
 def _set(event: dict, risk: int, reason: str | None) -> None:
+    """An event that is not a detection: it keeps the model's own score and its severity."""
     event["risk_score"] = risk
     event["risk_reason"] = reason
+
+
+COMMAND_SHOWN = 90  # characters of the command shown in the reason
+
+
+def _shown(command: str | None) -> str:
+    text = " ".join((command or "").split())
+    return text if len(text) <= COMMAND_SHOWN else text[: COMMAND_SHOWN - 1] + "…"
+
+
+def _set_detection(
+    event: dict,
+    kind: str,
+    reason: str | None,
+    requirements: dict | None = None,
+    command: str | None = None,
+    confidence: str = "reasonable",
+    verdict: dict | None = None,
+) -> None:
+    """An event that is a detection: scored with CVSS v3.1 (the kind's fixed vector, the
+    confidence of the finding, the computer's department). risk_score is the CVSS score x 10.
+    The reason says how bad (the score and the ATT&CK technique), what kind of thing it is, and
+    the command that was run, then why it was flagged. The severity follows the score, and
+    the full vector is kept in details["cvss"] so the score can be checked by anyone."""
+    result = cvss.score_detection(kind, confidence, requirements)
+    event["risk_score"] = int(round(result.score * 10))
+    technique = (verdict or {}).get("technique") or result.attack.split()[0]  # a LOLBAS match names its own
+    head = f"CVSS {result.score:.1f} {result.rating} ({technique}) {cvss.SHORT[kind]}"
+    if command:
+        head += f": {_shown(command)}"
+    text = head
+    if verdict and verdict["malicious"]:  # what the command model found, before the behaviour model's reasons
+        found = (
+            f"Rule: LOLBAS {verdict['technique']} {verdict['category']}".strip()
+            if verdict["confirmed"]
+            else f"Classifier: {verdict['probability']:.0%} chance this command is malicious"
+        )
+        reason = f"{found} | {reason}" if reason else found
+    for part in (reason or "").split(" | "):  # the column holds 200 characters: keep whole parts
+        if part and len(text) + 3 + len(part) <= 200:
+            text += f" | {part}"
+    event["risk_reason"] = text[:200]
     if "severity" in event:
-        event["severity"] = severity_for_risk(risk, event["severity"])
+        event["severity"] = severity_for_cvss(result.score, event["severity"])
+    details = event.get("details")
+    if isinstance(details, dict):
+        details["cvss"] = {
+            "detection": kind, "vector": result.vector, "base": result.base, "score": result.score,
+            "rating": result.rating, "attack": result.attack, "confidence": confidence,
+        }  # fmt: skip
+        if verdict:
+            details["cvss"]["command_model"] = {
+                "malicious": verdict["malicious"], "probability": round(verdict["probability"], 4),
+                "confirmed": verdict["confirmed"], "technique": verdict["technique"], "category": verdict["category"],
+            }  # fmt: skip
 
 
-def _score_failed_logons(events: list[dict], failed_count) -> None:
+set_detection = _set_detection  # for the detections that do not come from the model (services/scan_results.py)
+
+
+def _score_failed_logons(events: list[dict], failed_count, requirements: dict | None = None) -> None:
     for event in events:
         if event.get("event_type") == _FAILED_LOGON:
-            _set(event, *failed_logon_risk(failed_count(event) if failed_count else 1))
+            risk, reason = failed_logon_risk(failed_count(event) if failed_count else 1)
+            if risk >= ANOMALY_RISK_THRESHOLD:  # the alarm: failures piling up
+                _set_detection(event, "password_guessing", reason, requirements)
+            else:
+                _set(event, risk, reason)
+
+
+def keyboard_lookup(db):
+    """devices(endpoint_id, start, end) -> [(time, description)] of the USB keyboards that were
+    recognised on the computer in that period, from the stored events."""
+    from app.models.security_event import SecurityEvent as SE
+
+    def lookup(endpoint_id: int, start: datetime, end: datetime) -> list[tuple[datetime, str]]:
+        rows = db.query(SE.event_time, SE.details).filter(
+            SE.endpoint_id == endpoint_id, SE.windows_event_id == badusb.DEVICE_EVENT,
+            SE.event_time >= start, SE.event_time <= end,
+        )  # fmt: skip
+        return [(t, d) for t, details in rows if (d := badusb.keyboard_description(details))]
+
+    return lookup
+
+
+def _score_badusb(events: list[dict], devices, requirements_of) -> None:
+    """A shell or PowerShell command that starts within a few seconds after a USB keyboard was
+    plugged in is what a device that types commands looks like (services/badusb.py). It is a
+    detection of its own kind, and replaces the event's other detection only if it scores higher."""
+    window = timedelta(seconds=settings.badusb_window_seconds)
+    plugged: dict[int, list[tuple[datetime, str]]] = defaultdict(list)  # recognised in this same batch
+    for e in events:
+        if e.get("windows_event_id") == badusb.DEVICE_EVENT and (d := badusb.keyboard_description(e.get("details"))):
+            plugged[e["endpoint_id"]].append((e["event_time"], d))
+    for e in events:
+        if e.get("windows_event_id") not in ("4688", "4104"):
+            continue
+        row = e.get("_row") or row_from_event(e)
+        if not (badusb.is_shell(row) and is_user_action(row)):
+            continue
+        endpoint_id, when = e["endpoint_id"], e["event_time"]
+        known = list(plugged.get(endpoint_id, []))
+        if devices is not None:
+            known += devices(endpoint_id, when - window, when)
+        hit = badusb.keyboard_before(known, when, window)
+        if hit is None:
+            continue
+        requirements = requirements_of(endpoint_id)
+        result = cvss.score_detection("badusb", "reasonable", requirements)
+        gap, description = hit
+        note = f"USB keyboard plugged in {gap:.0f}s before: {description}"
+        if result.score <= (((e.get("details") or {}).get("cvss")) or {}).get("score", 0):
+            # the event already is something worse: keep that, but say that a keyboard had just been plugged in
+            if e.get("risk_reason"):
+                head, *rest = e["risk_reason"].split(" | ")
+                text = f"{head} | {note}"
+                for part in rest:  # the note goes first, then as many of the other reasons as fit
+                    if len(text) + 3 + len(part) <= 200:
+                        text += f" | {part}"
+                e["risk_reason"] = text[:200]
+            continue
+        _set_detection(e, "badusb", note, requirements, command=_command_text(row) or row.get("process_name"))
 
 
 def history_loader(db):
@@ -205,11 +380,23 @@ def _score_into(
         until = (overtime or {}).get(event["endpoint_id"])
         if (until is not None and event["event_time"] <= until) or event["endpoint_id"] in (neutral_time or ()):
             row["event_time"] = model.typical_time(row["event_time"])
-    for event, row, score in zip(events, rows, model.score_many(rows)):
+    verdicts = _command_verdicts(rows)
+    for i, (event, row, score) in enumerate(zip(events, rows, model.score_many(rows))):
         if not is_user_action(row) or event.get("event_type") == _FAILED_LOGON:
             continue
-        _set(event, score.risk, model.explain(row, score))
-    _score_failed_logons(events, failed_count)
+        verdict = verdicts.get(i)
+        confirmed = bool(verdict and verdict["confirmed"])
+        # Flagged by the behaviour model, or a command that is a known attack technique (a LOLBAS match
+        # is precise enough to count on its own). The classifier's opinion alone is not: it counts
+        # together with the behaviour model, because on its own it is wrong for about 1 benign command in 14.
+        if score.is_anomaly or confirmed:
+            _set_detection(
+                event, detection_for(model, row, score, verdict), model.explain(row, score), model.requirements,
+                command=_command_text(row), confidence="confirmed" if confirmed else "reasonable", verdict=verdict,
+            )
+        else:
+            _set(event, score.risk, model.explain(row, score))
+    _score_failed_logons(events, failed_count, model.requirements)
 
 
 def apply(
@@ -219,11 +406,13 @@ def apply(
     overtime: dict | None = None,
     neutral_time: set | None = None,
     history=None,
+    devices=None,
 ) -> None:
     """Adds risk_score and risk_reason to parsed alerts (each carrying its
     endpoint_id). `get_model(endpoint_id)` returns the endpoint's model or
     None; `failed_count` is failed_logon_counter's function; `overtime` the open
-    overtime windows (see _score_into); `history` is history_loader's function.
+    overtime windows (see _score_into); `history` is history_loader's function;
+    `devices` is keyboard_lookup's function (USB keyboards plugged in just before).
     Every event gets both keys, so the rows can be inserted together."""
     by_endpoint: dict[int, list[dict]] = defaultdict(list)
     for event in events:
@@ -237,6 +426,8 @@ def apply(
             _score_into(model, group, failed_count, overtime, neutral_time, history=earlier)
         else:
             _score_failed_logons(group, failed_count)  # the rule needs no model
+    # BadUSB is a rule too, and needs no model; it runs last so that it can replace a weaker detection.
+    _score_badusb(events, devices, lambda endpoint_id: getattr(get_model(endpoint_id), "requirements", None))
 
 
 def backfill(db, endpoint_id: int, model: BehaviorModel, days: int, batch: int = 2000, neutral_time: bool = False) -> int:
@@ -596,6 +787,7 @@ def train_endpoint(db, endpoint_id: int, evaluate=None, apply: bool = True) -> E
             adopted=adopted,
             min_command_evidence=settings.ml_min_command_evidence,
             min_program_commands=settings.ml_min_program_commands,
+            requirements=cvss.requirements_for(department),
         )
 
     report = None

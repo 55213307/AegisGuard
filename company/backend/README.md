@@ -78,6 +78,8 @@ and endpoints (ON DELETE CASCADE).
 - `POST /api/accounts/{id}/lock|unlock`
 - `DELETE /api/accounts/{id}` — also deletes the employee's Wazuh agent, revoking its key
 - `GET  /api/accounts/{id}/installer` — the employee's one-click endpoint installer (`.cmd`)
+- `POST /api/agent/scan` — (the scan agent, endpoint token) a USB drive or new downloads: names, attributes, hashes
+- `POST /api/agent/containment` — (the scan agent) the processes it ended after a Critical finding
 
 ## Endpoint installers
 
@@ -180,6 +182,51 @@ python -m app.services.ml.tools demo-history --endpoint-id N [--write|--delete] 
 Dataset files are kept outside the repository, in `Final Year Project/datasets/` (see the README there);
 `tools` reads `datasets/dataset.csv.gz` when no `--csv` is given. Thresholds and schedules are settings
 (`ML_*` in `app/core/config.py`).
+
+## Scoring and detections
+
+What is flagged is scored with **CVSS v3.1** (`app/services/cvss.py`): each kind of detection has one fixed
+vector with its reason and MITRE ATT&CK technique written down in `CATALOG`, the standard formulas give the
+score, the department sets the environmental requirements, and the confidence of the finding sets the
+temporal Report Confidence. `risk_score` is that score x 10; from `CVSS_LOCK_FROM` (7.0, the start of High)
+an event is Critical and locks the computer. `python -m app.services.cvss` checks the calculator against the
+specification's examples. The full vector of every detection is kept in the event's `details["cvss"]`.
+
+Three sources of detections, in `app/services/ml/runtime.py`:
+
+| source | what | file |
+|---|---|---|
+| behaviour model | a program or time that is new for this computer (Isolation Forest) | `ml/model.py` |
+| command model | LOLBAS rules + a classifier (TF-IDF + logistic regression) trained on LOLBAS and Atomic Red Team; a rule match counts alone, the classifier together with the behaviour model | `ml/commands.py` |
+| BadUSB | a shell or PowerShell command within `BADUSB_WINDOW_SECONDS` (10) after a USB keyboard was plugged in | `services/badusb.py` |
+
+The command model is trained by hand (`python -m app.services.ml.commands`, see its docstring; the public data
+goes in `Final Year Project/datasets/public/`) and saved to `ml_models/command_model.joblib`, which the backend
+loads if it exists. BadUSB reads event 6416 ("a new external device was recognized", audit subcategory
+Plug and Play Events, turned on by the installer; rule 100110 in `deploy/wazuh/aegisguard_rules.xml` makes the
+manager write it to alerts.json). Endpoints installed before this need the installer run again, or
+`auditpol /set /subcategory:"{0CCE9248-69AE-11D9-BED3-505054503030}" /success:enable` in an administrator prompt.
+
+### USB drives and downloads
+
+The installer also puts a **scan agent** on the computer (`scan-agent.ps1`, a hidden SYSTEM task started at
+boot; its text is `_SCAN_AGENT` in `app/services/installer.py`). It looks for a USB drive that was just plugged
+in and for new files in the users' Downloads folders, and reports them to `POST /api/agent/scan` with the
+endpoint's token. It only **reads**: it sends names, attributes and SHA256 hashes, never file content. For a
+drive it sends the part of the file list that the rules look at (programs, scripts, shortcuts, hidden files,
+autorun.inf), for Downloads the hashes of the new files. Its own log is `C:\ProgramData\AegisGuard\scan.log`.
+
+On the server (`app/services/scan_results.py`): the hash of every file is looked up in the `threat_intel` table
+(`app/services/threat_intel.py`; a hit is a confirmed finding), and a drive is checked against the USB rules
+(`app/services/usb_scan.py`: autorun.inf whose programs are not signed, double extension, hidden program,
+shortcut that starts a command or stands in for a hidden folder). Each finding is scored with CVSS and stored
+as a security event (type "USB Drive Scan" / "Downloaded File"), a scanned drive also leaves one "scanned"
+event, and a Critical finding (a known-bad hash) locks the computer and tells the agent to contain it: the
+agent ends the processes that run from that drive (or from the flagged download) and the processes they
+started, because a lock stops a person at the keyboard, not a script that is already running. What the agent
+ended (and what it could not end) is reported back to `POST /api/agent/containment` and stored as a
+"Containment" event, so it shows in Security Logs and the PDF report. A drive can also be read by hand:
+`python -m app.services.usb_scan --scan E:\ --list`.
 
 ## Structure
 

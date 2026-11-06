@@ -564,7 +564,11 @@ class BehaviorModel:
         use_command: bool = True,
         min_command_evidence: int = MIN_COMMAND_EVIDENCE,
         min_program_commands: int = MIN_PROGRAM_COMMANDS,
+        requirements: dict | None = None,
     ) -> None:
+        # CVSS environmental requirements (CR/IR/AR) of this computer's department, used to
+        # score what the model flags (see services/cvss.py); None = the specification's default.
+        self.requirements = requirements
         # Whether the command line is looked at; off only to measure what it adds.
         self.use_command = use_command
         self.min_command_evidence = min_command_evidence

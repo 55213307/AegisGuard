@@ -7,11 +7,26 @@
   alert for these by default, so without this rule they never reach alerts.json
   and the portal can't see what is typed into PowerShell. Level 3 is the lowest
   that is written to alerts.json; the portal does the judging itself.
+
+  100110: a new external device was recognised (event 6416, "Audit PNP Activity",
+  which the installer turns on). The Security channel is collected by default. The
+  portal reads the device's class and ids from the alert to tell a USB keyboard from
+  a flash drive, and treats a command that starts within seconds after a keyboard was
+  plugged in as a BadUSB (services/badusb.py). If the manager already has a rule that
+  writes this event to alerts.json, this one is redundant but harmless.
 -->
 <group name="aegisguard,powershell,">
   <rule id="100100" level="3">
     <if_sid>60000</if_sid>
     <field name="win.system.eventID">^4104$</field>
     <description>PowerShell script block executed</description>
+  </rule>
+</group>
+
+<group name="aegisguard,usb,">
+  <rule id="100110" level="3">
+    <if_sid>60000</if_sid>
+    <field name="win.system.eventID">^6416$</field>
+    <description>A new external device was recognized</description>
   </rule>
 </group>

@@ -380,19 +380,23 @@ const EndpointDetail = (() => {
         const m = r.metrics;
         const data = r.data || {};
         const source = data.mode === "real" ? "its own real activity" : `its real activity (${n(data.real_actions || 0)} actions) plus an assumed baseline`;
+        const cc = r.critical ? r.critical.confusion : null;
         message = [
           `Trained on ${source}: the oldest 80% (${n(r.train)} events, up to ${day(r.split)}) to learn from, the newest 20% (${n(r.test_normal)} events) to test on, plus ${n(r.injected)} injected anomalies.`,
+          ...(r.excluded_admin ? [`Left out of the normal events: ${n(r.excluded_admin)} admin-tool events (command prompts and the like), which the model flags on purpose.`] : []),
           ...(data.mode !== "real" ? ["Still learning: the baseline is an assumption, so this computer's real activity can look unfamiliar to the model."] : []),
           ...(r.train < 1000 ? [`Only ${n(r.train)} events to learn from: the more history, the more this test says.`] : []),
           "",
+          `An alert is what the portal raises: a finding scored CVSS ${r.threshold} or more (Warning or Critical).`,
           `Normal events: ${n(c.tn)} passed, ${n(c.fp)} false alarms`,
           `Anomalies: ${n(c.tp)} caught, ${n(c.fn)} missed`,
           "",
           `Accuracy ${pct(m.accuracy)}   Precision ${pct(m.precision)}   Recall ${pct(m.recall)}   F1 ${pct(m.f1)}`,
-          `False-alarm rate ${pct(m.fpr)}   AUC ${m.auc.toFixed(3)}   (alert at risk ${r.threshold}+)`,
+          `False-alarm rate ${pct(m.fpr)}   AUC ${m.auc.toFixed(3)} (of the behavior model's own score)`,
+          ...(cc ? ["", `Lock level (CVSS ${r.threshold_critical}+, a Critical event locks the computer): ${n(cc.tp)} of ${n(cc.tp + cc.fn)} anomalies would lock it, ${n(cc.fp)} false locks.`] : []),
           "",
-          "Caught, by kind of anomaly:",
-          ...r.kinds.map((k) => `  ${k.name}: ${pct(k.caught)}`),
+          "Caught, by kind of anomaly (alert / lock):",
+          ...r.kinds.map((k) => `  ${k.name}: ${pct(k.caught)} / ${pct(k.caught_critical || 0)}`),
           "",
           r.note,
         ].join("\n");

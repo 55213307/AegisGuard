@@ -106,6 +106,7 @@ def _store(db, lines: list[bytes], agents: dict[str, tuple[int, int]]) -> int:
             # Endpoints whose working hours the model hasn't learned yet aren't judged on the hour.
             {r["endpoint_id"] for r in judged if runtime.time_trusted(r["endpoint_id"]) is False},
             runtime.history_loader(db),
+            runtime.keyboard_lookup(db),
         )
     except Exception:  # a scoring problem must never cost us the alerts themselves
         log.exception("Scoring new events failed; storing them unscored")

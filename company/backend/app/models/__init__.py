@@ -5,6 +5,7 @@ from app.models.endpoint import Endpoint
 from app.models.lock_event import LockEvent
 from app.models.removed_endpoint import RemovedEndpoint
 from app.models.security_event import SecurityEvent
+from app.models.threat_intel import ThreatIndicator
 
 __all__ = [
     "Account",
@@ -16,4 +17,5 @@ __all__ = [
     "LockEvent",
     "RemovedEndpoint",
     "SecurityEvent",
+    "ThreatIndicator",
 ]

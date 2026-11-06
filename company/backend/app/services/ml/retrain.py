@@ -101,7 +101,7 @@ def save_charts(report: dict, folder: Path, show: bool = False) -> list[Path]:
     folder.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
     c, m = report["confusion"], report["metrics"]
-    threshold = report["threshold"]
+    threshold = report.get("ml_threshold", report["threshold"])  # the histogram is of the behaviour model's own 0-100 score
 
     def finish(fig, name: str) -> None:
         fig.tight_layout()

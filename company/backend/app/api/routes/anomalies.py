@@ -36,7 +36,10 @@ def feed(
             SecurityEvent.id > after_id,
             # Only Critical anomalies pop up and sound an alarm; a Warning is
             # still visible in the endpoint's risk score, just not pushed at anyone.
+            # A weak signal (a model's guess: its CVSS score can be high, its severity is capped
+            # at Warning) is a Warning too, so it does not pop up either.
             SecurityEvent.risk_score >= CRITICAL_RISK,
+            SecurityEvent.severity == "Critical",
         )
         .order_by(SecurityEvent.id.asc())
         .limit(FEED_LIMIT)

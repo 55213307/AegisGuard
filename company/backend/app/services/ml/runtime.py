@@ -71,6 +71,21 @@ _command_model = None
 _command_model_tried = False
 
 
+_load_lock = threading.Lock()
+
+
+def _one_at_a_time(loader):
+    """A saved model is loaded by one thread; another that asks meanwhile waits for it instead of going on without the model."""
+
+    def locked():
+        with _load_lock:
+            return loader()
+
+    locked.__doc__ = loader.__doc__
+    return locked
+
+
+@_one_at_a_time
 def command_model():
     """The malicious-command model (rules + classifier, ml/commands.py), loaded once; None when
     it is switched off or its file is missing, in which case scoring works without it."""
@@ -90,6 +105,63 @@ def command_model():
     except Exception:
         log.exception("Loading the malicious-command model failed; commands are not judged by it")
     return _command_model
+
+
+_url_model = None
+_url_model_tried = False
+
+
+@_one_at_a_time
+def url_model():
+    """The phishing-address model (ml/urls.py), loaded once; None when it is switched off or its file is missing."""
+    global _url_model, _url_model_tried
+    if _url_model_tried or not settings.url_model_enabled:
+        return _url_model
+    _url_model_tried = True
+    path = Path(settings.url_model_path) if settings.url_model_path else Path(__file__).resolve().parents[3] / "ml_models" / "url_model.joblib"
+    try:
+        if path.exists():
+            from app.services.ml import urls
+
+            _url_model = urls.load(path)
+            log.info("Phishing-address model loaded from %s.", path)
+        else:
+            log.info("No phishing-address model at %s: addresses are only checked against the lists.", path)
+    except Exception:
+        log.exception("Loading the phishing-address model failed; addresses are only checked against the lists")
+    return _url_model
+
+
+_file_model = None
+_file_model_tried = False
+
+
+@_one_at_a_time
+def file_model():
+    """The malware model on PE headers (ml/files.py), loaded once; None when it is switched off or its file is missing."""
+    global _file_model, _file_model_tried
+    if _file_model_tried or not settings.file_model_enabled:
+        return _file_model
+    _file_model_tried = True
+    path = Path(settings.file_model_path) if settings.file_model_path else Path(__file__).resolve().parents[3] / "ml_models" / "file_model.joblib"
+    try:
+        if path.exists():
+            from app.services.ml import files
+
+            _file_model = files.load(path)
+            log.info("Malware (PE header) model loaded from %s.", path)
+        else:
+            log.info("No malware (PE header) model at %s: programs are only checked against the hash lists.", path)
+    except Exception:
+        log.exception("Loading the malware (PE header) model failed; programs are only checked against the hash lists")
+    return _file_model
+
+
+def load_saved_models() -> dict[str, bool]:
+    """Load the three supervised models from ml_models/ now (they are trained offline by `python -m app.services.ml.commands`,
+    `.urls` and `.files`, never by the running service). Called when the service starts, so that the log says at once which
+    ones are in use; without this each one is loaded the first time it is needed."""
+    return {"command": command_model() is not None, "address": url_model() is not None, "file": file_model() is not None}
 
 
 def _command_text(row: dict) -> str:
@@ -217,6 +289,7 @@ def _set_detection(
     command: str | None = None,
     confidence: str = "reasonable",
     verdict: dict | None = None,
+    locks: bool = True,
 ) -> None:
     """An event that is a detection: scored with CVSS v3.1 (the kind's fixed vector, the
     confidence of the finding, the computer's department). risk_score is the CVSS score x 10.
@@ -232,7 +305,7 @@ def _set_detection(
     text = head
     if verdict and verdict["malicious"]:  # what the command model found, before the behaviour model's reasons
         found = (
-            f"Rule: LOLBAS {verdict['technique']} {verdict['category']}".strip()
+            f"Rule: {'attack pattern' if verdict.get('entry') == '(rule of our own)' else 'LOLBAS'} {verdict['technique']} {verdict['category']}".strip()
             if verdict["confirmed"]
             else f"Classifier: {verdict['probability']:.0%} chance this command is malicious"
         )
@@ -243,12 +316,16 @@ def _set_detection(
     event["risk_reason"] = text[:200]
     if "severity" in event:
         event["severity"] = severity_for_cvss(result.score, event["severity"])
+        if not locks and event["severity"] == "Critical":  # a weak signal on its own (a model's guess) raises an alert, never a lock
+            event["severity"] = "Warning"
     details = event.get("details")
     if isinstance(details, dict):
         details["cvss"] = {
             "detection": kind, "vector": result.vector, "base": result.base, "score": result.score,
             "rating": result.rating, "attack": result.attack, "confidence": confidence,
         }  # fmt: skip
+        if not locks:
+            details["cvss"]["weak_signal"] = True  # the severity is capped at Warning; the CVSS score above is the full one
         if verdict:
             details["cvss"]["command_model"] = {
                 "malicious": verdict["malicious"], "probability": round(verdict["probability"], 4),
@@ -390,9 +467,14 @@ def _score_into(
         # is precise enough to count on its own). The classifier's opinion alone is not: it counts
         # together with the behaviour model, because on its own it is wrong for about 1 benign command in 14.
         if score.is_anomaly or confirmed:
+            kind = detection_for(model, row, score, verdict)
+            # A command that only the classifier calls malicious (no known attack technique matches it) is a weak signal: it raises
+            # an alert, never a lock. Installers and updaters of ordinary software look like malware to it (Chrome's updater scores 0.93,
+            # Google Update 0.92, a 7-Zip installer 0.70), and a lock on every software install is worse than a missed guess.
             _set_detection(
-                event, detection_for(model, row, score, verdict), model.explain(row, score), model.requirements,
+                event, kind, model.explain(row, score), model.requirements,
                 command=_command_text(row), confidence="confirmed" if confirmed else "reasonable", verdict=verdict,
+                locks=not (kind == "malicious_command" and not confirmed),
             )
         else:
             _set(event, score.risk, model.explain(row, score))
@@ -919,6 +1001,7 @@ def start() -> None:
     _started_at = datetime.now(timezone.utc)
     _thread = threading.Thread(target=_run, name="ml-trainer", daemon=True)
     _thread.start()
+    threading.Thread(target=load_saved_models, name="ml-load-saved", daemon=True).start()  # not in the way of the start-up
     log.info("Model trainer started (retraining every %g days).", settings.ml_retrain_days)
 
 

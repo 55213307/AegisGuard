@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     # keyboard was plugged in is what a device that types commands looks like.
     badusb_window_seconds: float = 10.0
     command_model_enabled: bool = True
+    # The phishing-address model (ml/urls.py), used on the address a downloaded file came from. Empty path = ml_models/url_model.joblib.
+    url_model_enabled: bool = True
+    url_model_path: str = ""
+    # The malware model (ml/files.py), used on the PE header numbers the scan agent sends for 32-bit programs. Empty path = ml_models/file_model.joblib.
+    file_model_enabled: bool = True
+    file_model_path: str = ""
     command_model_path: str = ""
     # The command line is only judged once this many baseline actions carry one, and a
     # program only once it has this many of its own (see ml/model.py). Lower them to see it

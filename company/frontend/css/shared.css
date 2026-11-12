@@ -708,8 +708,8 @@ svg {
 
 .activity-row > .badge {
   flex-shrink: 0;
-  min-width: 140px;
-  justify-content: flex-start;
+  min-width: 76px;
+  justify-content: center;
 }
 
 /* The risk score badge sits inside the description, not in the type column. */
@@ -723,6 +723,16 @@ svg {
   font-size: 13px;
   color: var(--text-secondary);
   min-width: 0;
+}
+
+/* The event type (Process, Downloaded File ...) as plain text in front of the description, like the Event Type column of Security Logs. */
+.activity-type {
+  margin-right: 6px;
+  color: var(--text-muted);
+}
+
+.activity-type::after {
+  content: " ·";
 }
 
 .detail-activity .activity-row:first-of-type {

@@ -74,6 +74,7 @@ class Finding:
     detail: str  # one line for the reason shown in the portal
     confirmed: bool = False  # from an exact lookup (threat intelligence), not from a rule
     category: str | None = None  # the malware family, when a list names one
+    weak: bool = False  # a model's guess on its own: raises an alert but never locks the computer
     extra: dict = field(default_factory=dict)
 
 

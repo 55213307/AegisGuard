@@ -17,6 +17,7 @@ Fill the table with public lists (they are downloaded by hand, some need a free 
     python -m app.services.threat_intel seed                                 # the built-in test entries (EICAR)
     python -m app.services.threat_intel import --kind sha256 --source malwarebazaar --file recent.csv
     python -m app.services.threat_intel import --kind url --source openphish --file feed.txt
+    python -m app.services.threat_intel fetch                                # download the free public feeds and import them
     python -m app.services.threat_intel lookup --kind sha256 <hash>
     python -m app.services.threat_intel stats
 
@@ -247,6 +248,51 @@ def read_list(path: Path, kind: str, source: str, column: str | None = None, typ
             yield (kind, row[name], source, category, when)
 
 
+# Free feeds that can be downloaded without an account: (name, address, kind, category, what it is).
+# The lists change every few hours (Phishing Army says it expires in 4 hours), and an import only adds,
+# so run `fetch` again to refresh. URLhaus and MalwareBazaar's own download addresses need an abuse.ch
+# account key now, so they are imported with `import --file` from a list downloaded by hand.
+FEEDS = [
+    ("openphish", "https://openphish.com/feed.txt", "url", "phishing", "OpenPhish community feed: phishing pages that are online now"),
+    ("phishing_army", "https://phishing.army/download/phishing_army_blocklist.txt", "domain", "phishing",
+     "Phishing Army: domains from PhishTank, OpenPhish, CERT.PL, urlscan.io and others"),
+]
+_DATASETS = Path(__file__).resolve().parents[6] / "datasets" / "public"
+FEED_DIR = _DATASETS / "feeds" if _DATASETS.exists() else Path(__file__).resolve().parents[2] / "feeds"  # on the server there is no datasets folder
+MAX_FEED_BYTES = 20 * 1024 * 1024  # a feed bigger than this is not what it says it is
+
+
+def download(url: str, target: Path) -> int:
+    """Download one feed (https only, at most MAX_FEED_BYTES). Returns the number of bytes."""
+    from urllib.request import Request, urlopen
+
+    if not url.startswith("https://"):
+        raise ValueError("feeds are only downloaded over https")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    with urlopen(Request(url, headers={"User-Agent": "AegisGuard-feed-fetch"}), timeout=60) as response, open(target, "wb") as out:
+        while chunk := response.read(65536):
+            size += len(chunk)
+            if size > MAX_FEED_BYTES:
+                raise ValueError(f"{url} is larger than {MAX_FEED_BYTES // 1024 // 1024} MB")
+            out.write(chunk)
+    return size
+
+
+def fetch_feeds(db, names: list[str] | None = None, folder: Path = FEED_DIR) -> list[tuple[str, int, int, int]]:
+    """Download the free feeds and import them. Returns (name, bytes, entries added or already known, skipped)."""
+    done = []
+    for name, url, kind, category, _ in FEEDS:
+        if names and name not in names:
+            continue
+        target = folder / f"{name}.txt"
+        size = download(url, target)
+        entries = ((k, v, source, category, when) for k, v, source, _c, when in read_list(target, kind, name))
+        total, skipped = add_many(db, entries)
+        done.append((name, size, total, skipped))
+    return done
+
+
 def stats(db) -> list[tuple[str, str, int]]:
     from sqlalchemy import func
 
@@ -272,6 +318,8 @@ def main() -> None:
     look = sub.add_parser("lookup", help="look one value up")
     look.add_argument("--kind", choices=KINDS, required=True)
     look.add_argument("value")
+    fetch = sub.add_parser("fetch", help="download the free public feeds and import them")
+    fetch.add_argument("--only", nargs="*", choices=[f[0] for f in FEEDS], help="only these feeds (default: all)")
     sub.add_parser("stats", help="how many entries there are")
     args = parser.parse_args()
 
@@ -281,6 +329,9 @@ def main() -> None:
     try:
         if args.command == "seed":
             print(f"{seed_builtin(db)} built-in entries added or already there")
+        elif args.command == "fetch":
+            for name, size, total, skipped in fetch_feeds(db, args.only):
+                print(f"{name:<14} downloaded {size / 1024:,.0f} KB, {total:,} entries added or already there, {skipped} skipped as not valid")
         elif args.command == "import":
             types = {t.strip().lower() for t in args.types.split(",") if t.strip()} if args.types else None
             total, skipped = add_many(db, read_list(args.file, args.kind, args.source, args.column, types))

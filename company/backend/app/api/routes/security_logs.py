@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Response
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, require_password_changed
@@ -16,12 +17,15 @@ router = APIRouter(prefix="/api/security-logs", tags=["security logs"])
 # export both work from what the page already has — see SecurityReportRequest.
 LIST_LIMIT = 1000
 # A security log that matters is a Warning or Critical; routine activity
-# (logons, configuration scans) is left out of this page entirely.
+# (logons, configuration scans) is left out of this page entirely. The one Info
+# record that is listed is Containment: what the agent ended after a Critical
+# finding, which an administrator wants to see.
 _REPORTABLE_SEVERITIES = ("Warning", "Critical")
+_ALWAYS_LISTED_TYPES = ("Containment",)
 
 
 def _query(db: Session, company_id: int, days: int):
-    """This company's Warning/Critical events within the day window, newest
+    """This company's Warning/Critical events (and Containment records) within the day window, newest
     first, joined to their endpoint so each row carries the computer's name."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
     return (
@@ -30,7 +34,7 @@ def _query(db: Session, company_id: int, days: int):
         .filter(
             SecurityEvent.unique_id == company_id,
             SecurityEvent.event_time >= since,
-            SecurityEvent.severity.in_(_REPORTABLE_SEVERITIES),
+            or_(SecurityEvent.severity.in_(_REPORTABLE_SEVERITIES), SecurityEvent.event_type.in_(_ALWAYS_LISTED_TYPES)),
         )
         .order_by(SecurityEvent.event_time.desc())
     )

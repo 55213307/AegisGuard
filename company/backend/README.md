@@ -243,3 +243,43 @@ app/
     ml/       the behavioral model (above)
 deploy/       deploy script, systemd unit, nginx config, Wazuh rules (company/deploy)
 ```
+
+**Where a download came from.** The agent also reads the address the browser wrote into each new file (the
+`HostUrl` line of its Zone.Identifier stream) and sends it as `source_url`. The backend checks it against the
+threat-intelligence lists (a match is a confirmed `phishing_url` finding, scored by CVSS like any other, so it can
+lock the computer) and otherwise asks the phishing-address model (`app/services/ml/urls.py`). The model is a weak
+signal: its alert threshold is 0.8 (see the threshold table printed by `python -m app.services.ml.urls`), and its
+findings are capped at Warning, so they never lock a computer. It judges the host only: the PhiUSIIL dataset's
+legitimate addresses are all `https://www.<site>` home pages, so scheme, `www.` and path are ignored, and 60,000
+legitimate hosts from the Tranco list are added (bare domains, plus the same domains with an everyday
+subdomain made up by us). The model file is `ml_models/url_model.joblib` (`url_model_enabled` / `url_model_path`).
+
+**Status of that model (Nov 9).** `urls.py` now holds a second version (Kaggle + PhiUSIIL + Tranco, a character-level
+text model plus boosted trees). Tested by registered domain it scores about 90%, and it flags ordinary download pages such
+as `download.microsoft.com/.../setup.exe` (Kaggle's malware class is mostly `.exe` links), so it is **not** deployed: there
+is no `url_model.joblib`, and the scan uses the lists only. A public pretrained model (pirocheto/phishing-url-detection)
+was tried too: it flags 43% of Tranco's popular domains when they are written without `www.`. Addresses alone do not
+separate phishing well on any public data we tried; random splits give 96% only because a site is seen on both sides.
+
+**Malware model on the program's header (Nov 9).** For 32-bit programs (`.exe`, `.dll`, `.scr`, `.cpl`) the scan agent also reads the
+first bytes of the file (`Get-PeHeader` in `services/installer.py`) and sends the 55 numbers of the PE header as `pe`, in the
+order of `PE_COLUMNS` in `app/services/ml/files.py`; nothing else of the file leaves the computer. The backend asks the model
+(`ml_models/file_model.joblib`, `file_model_enabled` / `file_model_path`) and raises a weak finding from a probability of 99%
+(a Warning, never a lock; a known-bad hash is still judged by the lists first). The header reader was checked against the
+`pefile` library on 222 real programs of the development PC: all 55 fields identical for every one. Trained on ClaMP
+(4,560 programs after removing 624 duplicates): 98.4% on a random split, 93.3% when learning on programs compiled up to
+2011 and testing on newer ones (a neural network fell to 75.7% there, which is why gradient boosting is used). Limits:
+99.8% of ClaMP's programs are 32-bit, so 64-bit programs are not judged at all; its benign programs are older Windows
+files; 0 of 222 real programs of this PC were flagged. Train it with `python -m app.services.ml.files`.
+
+**Saved supervised models.** The command, address and file models are trained offline (`python -m app.services.ml.commands --rebuild`,
+`.urls`, `.files`; each prints its tests, draws its charts into `ml_reports/` and writes `ml_models/*.joblib`). The service only loads
+those files, at start-up (the log names each one), and never retrains them; only the unsupervised behaviour model is retrained by the
+service. Command lines arrive from Wazuh with doubled backslashes and escaped quotes and are put back before they are judged
+(`commands.unescape`). The command classifier also learns from the real system commands of the test computers; on real commands
+of a capture it did not learn from it calls 15% malicious (71% before), and it stays a weak signal.
+
+**Free feeds.** `python -m app.services.threat_intel fetch` downloads OpenPhish (phishing addresses) and Phishing Army
+(144,000 phishing domains) and imports them, `import --kind sha256 --source malwarebazaar --file ... --types exe,dll,msi`
+adds MalwareBazaar hashes. Run `fetch` again to refresh (the lists change every few hours). URLhaus and MalwareBazaar's own
+download addresses need an abuse.ch key, so they are imported from files downloaded by hand.

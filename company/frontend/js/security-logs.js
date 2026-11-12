@@ -1,13 +1,16 @@
 // Info-level events (routine logons, configuration scans) never reach this
-// page — the backend already leaves them out, so only these two matter here.
+// page — the backend already leaves them out. The one exception is the
+// Containment record (what the agent ended after a Critical finding), which is Info.
 const SEVERITY_BADGE_CLASS = {
   critical: "badge-danger",
   warning: "badge-warning",
+  info: "badge-success",
 };
 
 const SEVERITY_LABEL = {
   critical: "Critical",
   warning: "Warning",
+  info: "Info",
 };
 
 let allLogs = [];

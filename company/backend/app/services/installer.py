@@ -11,6 +11,7 @@ downloads (names, attributes and hashes only) for the portal to judge.
 """
 
 import base64
+import gzip
 import re
 
 from app.core.config import settings
@@ -320,7 +321,7 @@ $HashTypes = $Programs + @('.zip', '.rar', '.7z', '.iso', '.img', '.doc', '.docx
 $PartialTypes = @('.crdownload', '.part', '.tmp', '.download', '.opdownload')
 $MaxHashBytes = 200MB
 $MaxEntries = 4000
-$DownloadsEvery = 60
+$DownloadsEvery = 5
 $DrivePoll = 3
 
 # What the agent did, for whoever has to find out why a drive was not reported (ProgramData\AegisGuard\scan.log).
@@ -401,6 +402,48 @@ function Get-Sha256($Path) {
     try { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLower() } catch { return $null }
 }
 
+# The 55 numbers of a 32-bit program's PE header (DOS header, file header, optional header), in the order of the
+# columns of the portal's malware model (PE_COLUMNS in ml/files.py). Only the first bytes of the file are read; nothing
+# is run and no content leaves the computer. $null for anything that is not a 32-bit Windows program.
+$PeTypes = @('.exe', '.dll', '.scr', '.cpl')
+function Get-PeHeader([string]$Path) {
+    $fs = $null
+    try {
+        $fs = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+        if ($fs.Length -lt 512) { return $null }
+        $d = New-Object byte[] 64
+        if ($fs.Read($d, 0, 64) -ne 64) { return $null }
+        if ($d[0] -ne 0x4D -or $d[1] -ne 0x5A) { return $null }
+        $at = [BitConverter]::ToInt32($d, 60)
+        if ($at -lt 64 -or $at -gt 4096 -or ($at + 248) -gt $fs.Length) { return $null }
+        [void]$fs.Seek($at, 'Begin')
+        $n = New-Object byte[] 248
+        $got = 0
+        while ($got -lt 248) { $r = $fs.Read($n, $got, 248 - $got); if ($r -le 0) { return $null }; $got += $r }
+        if ($n[0] -ne 0x50 -or $n[1] -ne 0x45 -or $n[2] -ne 0 -or $n[3] -ne 0) { return $null }
+        if ([BitConverter]::ToUInt16($n, 4) -ne 332 -or [BitConverter]::ToUInt16($n, 24) -ne 267) { return $null }  # 32-bit programs only
+        $year = ([DateTime]'1970-01-01').AddSeconds([BitConverter]::ToUInt32($n, 8)).Year
+        return [long[]]@(
+            [BitConverter]::ToUInt16($d, 0), [BitConverter]::ToUInt16($d, 2), [BitConverter]::ToUInt16($d, 4), [BitConverter]::ToUInt16($d, 6),
+            [BitConverter]::ToUInt16($d, 8), [BitConverter]::ToUInt16($d, 10), [BitConverter]::ToUInt16($d, 12), [BitConverter]::ToUInt16($d, 14),
+            [BitConverter]::ToUInt16($d, 16), [BitConverter]::ToUInt16($d, 18), [BitConverter]::ToUInt16($d, 20), [BitConverter]::ToUInt16($d, 22),
+            [BitConverter]::ToUInt16($d, 24), [BitConverter]::ToUInt16($d, 26), 0, [BitConverter]::ToUInt16($d, 36), [BitConverter]::ToUInt16($d, 38), 0,
+            $at,
+            [BitConverter]::ToUInt16($n, 4), [BitConverter]::ToUInt16($n, 6), $year, [BitConverter]::ToUInt32($n, 12), [BitConverter]::ToUInt32($n, 16),
+            [BitConverter]::ToUInt16($n, 20), [BitConverter]::ToUInt16($n, 22),
+            [BitConverter]::ToUInt16($n, 24), $n[26], $n[27], [BitConverter]::ToUInt32($n, 28), [BitConverter]::ToUInt32($n, 32), [BitConverter]::ToUInt32($n, 36),
+            [BitConverter]::ToUInt32($n, 40), [BitConverter]::ToUInt32($n, 44), [BitConverter]::ToUInt32($n, 48), [BitConverter]::ToUInt32($n, 52),
+            [BitConverter]::ToUInt32($n, 56), [BitConverter]::ToUInt32($n, 60),
+            [BitConverter]::ToUInt16($n, 64), [BitConverter]::ToUInt16($n, 66), [BitConverter]::ToUInt16($n, 68), [BitConverter]::ToUInt16($n, 70),
+            [BitConverter]::ToUInt16($n, 72), [BitConverter]::ToUInt16($n, 74),
+            [BitConverter]::ToUInt32($n, 80), [BitConverter]::ToUInt32($n, 84), [BitConverter]::ToUInt32($n, 88),
+            [BitConverter]::ToUInt16($n, 92), [BitConverter]::ToUInt16($n, 94),
+            [BitConverter]::ToUInt32($n, 96), [BitConverter]::ToUInt32($n, 100), [BitConverter]::ToUInt32($n, 104), [BitConverter]::ToUInt32($n, 108),
+            [BitConverter]::ToUInt32($n, 112), [BitConverter]::ToUInt32($n, 116)
+        )
+    } catch { return $null } finally { if ($fs) { $fs.Dispose() } }
+}
+
 # What an autorun.inf starts, and whether those programs carry a valid digital signature
 # (a Windows installation drive has an autorun.inf too, pointing at Microsoft's signed setup.exe).
 function Get-AutorunInfo($Root, $File) {
@@ -453,6 +496,7 @@ function Get-DriveListing($Drive) {
         if (-not ($hidden -or ($Programs -contains $ext) -or $isAutorun)) { continue }
         $entry = [ordered]@{ path = $rel; is_dir = $false; size = [long]$it.Length; hidden = $hidden; sha256 = $null; target = $null; target_signed = $null }
         if (($HashTypes -contains $ext) -and ($it.Length -le $MaxHashBytes)) { $entry.sha256 = Get-Sha256 $it.FullName }
+        if (($PeTypes -contains $ext) -and ($it.Length -le $MaxHashBytes)) { $pe = Get-PeHeader $it.FullName; if ($pe) { $entry.pe = $pe } }
         if ($ext -eq '.lnk') {
             try { $l = $shell.CreateShortcut($it.FullName); $entry.target = ("$($l.TargetPath) $($l.Arguments)").Trim() } catch {}
         }
@@ -503,6 +547,16 @@ function Get-FileKey($f) { return ($f.FullName + '|' + $f.LastWriteTimeUtc.Ticks
 
 # New files in Downloads, not yet reported. The first time the agent runs, what is already there is
 # only remembered, not reported.
+# The address the browser says a file came from (the HostUrl line of its Zone.Identifier stream); $null when there is none.
+function Get-SourceUrl([string]$Path) {
+    try {
+        foreach ($line in (Get-Content -LiteralPath $Path -Stream Zone.Identifier -ErrorAction Stop)) {
+            if ($line -like 'HostUrl=http*') { $u = ([string]$line).Substring(8); return $u.Substring(0, [Math]::Min($u.Length, 500)) }
+        }
+    } catch {}
+    return $null
+}
+
 function Scan-Downloads($Seen, [bool]$Baseline) {
     $now = [DateTime]::UtcNow
     $new = @()
@@ -525,7 +579,9 @@ function Scan-Downloads($Seen, [bool]$Baseline) {
             $ext = $f.Extension.ToLower()
             $sha = $null
             if (($HashTypes -contains $ext) -and ($f.Length -le $MaxHashBytes)) { $sha = Get-Sha256 $f.FullName }
-            $files += [ordered]@{ path = $f.FullName; is_dir = $false; size = [long]$f.Length; hidden = $false; sha256 = $sha; target = $null; target_signed = $null }
+            $record = [ordered]@{ path = $f.FullName; is_dir = $false; size = [long]$f.Length; hidden = $false; sha256 = $sha; target = $null; target_signed = $null; source_url = (Get-SourceUrl $f.FullName) }
+            if (($PeTypes -contains $ext) -and ($f.Length -le $MaxHashBytes)) { $pe = Get-PeHeader $f.FullName; if ($pe) { $record.pe = $pe } }
+            $files += $record
         }
         try {
             $scanId = [guid]::NewGuid().ToString('N')
@@ -591,7 +647,11 @@ if ($MyInvocation.InvocationName -ne '.') {
 _SETUP_SCAN_AGENT = r"""$ErrorActionPreference = 'Stop'
 try {
     New-Item -ItemType Directory -Force -Path '__INSTALL_DIR__' | Out-Null
-    [IO.File]::WriteAllBytes('__SCAN_PATH__', [Convert]::FromBase64String(__SCAN_B64__))
+    # the script is gzip-compressed: uncompressed it filled the environment block (32,767 characters in all)
+    $zip = New-Object IO.Compression.GzipStream((New-Object IO.MemoryStream(,[Convert]::FromBase64String(__SCAN_B64__))), [IO.Compression.CompressionMode]::Decompress)
+    $plain = New-Object IO.MemoryStream
+    $zip.CopyTo($plain)
+    [IO.File]::WriteAllBytes('__SCAN_PATH__', $plain.ToArray())
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "__SCAN_PATH__"'
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -874,12 +934,15 @@ def _comment_safe(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9 ._@()-]", "?", text)
 
 
-def _env_chunks(prefix: str, text: str) -> tuple[str, str]:
+def _env_chunks(prefix: str, text: str, compress: bool = False) -> tuple[str, str]:
     """cmd.exe refuses batch lines longer than 8191 characters (it aborts the
     whole script), so a script's Base64 is spread over several environment
     variables, PREFIX_00, PREFIX_01, ... Returns the `set` lines for the .cmd
     and the PowerShell expression that joins them back together."""
-    b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    data = text.encode("utf-8")
+    if compress:  # the receiving PowerShell must decompress (see _SETUP_SCAN_AGENT)
+        data = gzip.compress(data, 9, mtime=0)
+    b64 = base64.b64encode(data).decode("ascii")
     chunks = [b64[i : i + _CMD_CHUNK] for i in range(0, len(b64), _CMD_CHUNK)]
     set_lines = "\n".join(f'set "{prefix}_{i:02d}={chunk}"' for i, chunk in enumerate(chunks))
     expr = "(" + " + ".join(f"$env:{prefix}_{i:02d}" for i in range(len(chunks))) + ")"
@@ -906,7 +969,7 @@ def build_installer(company: str, employee: str, key_line: str, screen_token: st
     scan_agent = _SCAN_AGENT.replace("__SCAN_URL__", portal + "/api/agent/scan").replace("__TOKEN__", screen_token)
     agent_set_lines, agent_b64_expr = _env_chunks("AG_SCREEN_AGENT", screen_agent)
     removal_set_lines, removal_b64_expr = _env_chunks("AG_REMOVAL_AGENT", removal_agent)
-    scan_set_lines, scan_b64_expr = _env_chunks("AG_SCAN_AGENT", scan_agent)
+    scan_set_lines, scan_b64_expr = _env_chunks("AG_SCAN_AGENT", scan_agent, compress=True)
     scan_setup = (
         _SETUP_SCAN_AGENT.replace("__INSTALL_DIR__", INSTALL_DIR)
         .replace("__SCAN_B64__", scan_b64_expr)

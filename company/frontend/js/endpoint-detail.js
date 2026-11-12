@@ -24,6 +24,7 @@ const EndpointDetail = (() => {
   const activityEl = document.getElementById("detailActivity");
 
   const SEVERITY_BADGE = { Critical: "badge-danger", Warning: "badge-warning", Info: "badge-success" };
+  const SEVERITY_LABEL = { Critical: "Critical", Warning: "Warning", Info: "Info" };
 
   let account = null;
   let onChanged = () => {};
@@ -228,8 +229,10 @@ const EndpointDetail = (() => {
       }
       activityEl.innerHTML = data.items
         .map((e) => {
-          const label = e.event_type || e.severity;
+          // Same as the Security Logs page: the coloured badge is the severity, the event type is plain text.
+          const label = SEVERITY_LABEL[e.severity] || e.severity || "Info";
           const badge = SEVERITY_BADGE[e.severity] || "badge-success";
+          const type = e.event_type ? `<span class="activity-type">${escapeHtml(e.event_type)}</span>` : "";
           const desc = e.rule_description || "";
           const user = e.event_user ? ` · ${escapeHtml(e.event_user)}` : "";
           const risk = riskStyle(e.risk_score);
@@ -239,7 +242,7 @@ const EndpointDetail = (() => {
             <div class="activity-row">
               <span class="activity-time">${escapeHtml(formatEventTime(e.event_time))}</span>
               <span class="badge ${badge}">${escapeHtml(label)}</span>
-              <span class="activity-desc">${riskBadge}${escapeHtml(desc)}${user}${reason}</span>
+              <span class="activity-desc">${riskBadge}${type}${escapeHtml(desc)}${user}${reason}</span>
             </div>`;
         })
         .join("");

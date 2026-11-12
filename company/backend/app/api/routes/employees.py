@@ -116,7 +116,8 @@ def _risk_24h(db: Session, employees: list[Employee]) -> dict[int, tuple[int | N
         db.query(
             SecurityEvent.endpoint_id,
             func.max(SecurityEvent.risk_score),
-            func.max(case((SecurityEvent.event_time >= recent_since, SecurityEvent.risk_score), else_=None)),
+            # the flag of a computer that is alerting right now: a weak signal (severity Warning with a high score) is not one
+            func.max(case((and_(SecurityEvent.event_time >= recent_since, or_(SecurityEvent.severity == "Critical", SecurityEvent.risk_score < CRITICAL_RISK)), SecurityEvent.risk_score), else_=None)),
         )
         .filter(counted, SecurityEvent.event_time >= now - timedelta(hours=24))
         .group_by(SecurityEvent.endpoint_id)
@@ -471,7 +472,7 @@ def list_events(
     db: Session = Depends(get_db),
 ) -> SecurityEventListResponse:
     """Recent problems on this employee's computer, newest first: events the
-    behavioral model rates elevated or worse, and Warning/Critical events.
+    behavioral model rates elevated or worse, Warning/Critical events, and the Containment records.
     Routine activity (process creations, logons) is left out, and so are the
     CIS benchmark results, which each configuration scan reports in bulk."""
     employee = _get_employee_or_404(employee_id, principal, db)
@@ -487,6 +488,7 @@ def list_events(
                     SecurityEvent.severity.in_(("Warning", "Critical")),
                     or_(SecurityEvent.event_type.is_(None), SecurityEvent.event_type != "Security Configuration"),
                 ),
+                SecurityEvent.event_type == "Containment",  # what the agent ended after a Critical finding: the proof, Info as it is
             ),
         )
         .order_by(SecurityEvent.event_time.desc())

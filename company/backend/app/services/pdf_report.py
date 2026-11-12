@@ -95,7 +95,7 @@ def _summary_table(items: list[SecurityLogItem], generated_at: datetime) -> Tabl
 
 
 def _severity_cell(severity: str) -> Paragraph:
-    color = _CRITICAL if severity == "critical" else _WARNING
+    color = _CRITICAL if severity == "critical" else _WARNING if severity == "warning" else _MUTED  # Info: the Containment records
     style = ParagraphStyle("sev", parent=_BODY, textColor=color, fontName="Helvetica-Bold")
     return Paragraph(severity.capitalize(), style)
 

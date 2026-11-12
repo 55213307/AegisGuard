@@ -16,6 +16,17 @@ class ScanFile(BaseModel):
     sha256: str | None = None  # of programs, scripts, shortcuts, libraries, archives and documents
     target: str | None = Field(default=None, max_length=500)  # a .lnk's target and arguments; an autorun.inf's open= lines
     target_signed: bool | None = None  # autorun.inf only: are the programs it starts validly signed?
+    pe: list[int] | None = Field(default=None, max_length=200)  # 32-bit programs only: the 55 numbers of the PE header, in the order of ml/files.py PE_COLUMNS
+    source_url: str | None = Field(default=None, max_length=500)  # Downloads only: the address the browser says the file came from (Zone.Identifier HostUrl)
+
+    @field_validator("pe")
+    @classmethod
+    def _header(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        if len(value) != 55 or any(v < 0 or v > 2**32 for v in value):
+            return None  # not a header the model can read: it is simply not judged
+        return value
 
     @field_validator("sha256")
     @classmethod
